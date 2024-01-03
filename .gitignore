@@ -1,0 +1,8 @@
+__pycache__
+*.pyc
+
+# PyCharm
+.idea
+
+# Mac OS X
+.DS_Store
