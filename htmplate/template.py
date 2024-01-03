@@ -98,14 +98,22 @@ class FileField(FieldAbstract):
 class HTMLTemplate:
 
     def __init__(self, template: str):
-        self.template = template
+        self._template_content = template
         self._fields_cache: None | list[tuple[int, int, FieldAbstract]] = None
+
+    @property
+    def template_content(self) -> str:
+        return self._template_content
+
+    @property
+    def is_final(self) -> bool:
+        return len(self.fields()) == 0
 
     def fields(self) -> list[FieldAbstract]:
         if self._fields_cache is None:
             self._fields_cache = []
             for field_cls in FieldAbstract.get_registry():
-                for match in re.finditer(field_cls.get_regex(), self.template):
+                for match in re.finditer(field_cls.get_regex(), self._template_content):
                     self._fields_cache.append((match.start(), match.end(), field_cls.init(match.group(0))))
             self._fields_cache.sort(key=lambda x: x[0])
 
@@ -121,7 +129,7 @@ class HTMLTemplate:
             if start < last_end:
                 raise ValueError('Overlapping fields')  # TODO: change to custom exception
 
-            out_template.append(instance.template[last_end:start])
+            out_template.append(instance._template_content[last_end:start])
             value, is_correct = field.execute(values)
             if is_correct:
                 out_template.append(value)
@@ -130,7 +138,7 @@ class HTMLTemplate:
                 out_template.append(field.get_field_content())
             last_end = end
 
-        out_template.append(instance.template[last_end:])
+        out_template.append(instance._template_content[last_end:])
         return instance.__class__(''.join(out_template)), filled_anything
 
     def make(self, values: dict[str, Any], iter_limit: int = -1) -> Self:

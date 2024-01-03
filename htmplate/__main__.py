@@ -3,7 +3,7 @@ import json
 import argparse
 from pathlib import Path
 
-from .make import make
+from .template import HTMLTemplate
 
 
 def error_exit(message: str):
@@ -52,7 +52,9 @@ def main():
             continue
         if Path(out_path / out_name).exists() and not args.replace_old:
             continue
-        generated_html = make(template, value)
+        generator = HTMLTemplate(template)
+        generated_html = generator.make(value)
+        assert generator.is_final
         with open(out_path / out_name, 'w') as f:
             f.write(generated_html)
 
