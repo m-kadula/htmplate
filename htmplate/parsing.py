@@ -50,7 +50,8 @@ class Field(ABC):
 
     def __init__(self, field_content: str, start: int, parser: Parser):
         if not self.match(field_content):
-            raise ParsingError(f'Field content {field_content} does not match field type {self.__class__.__name__}')
+            raise self.FieldInitError(
+                f'Field content {field_content} does not match field type {self.__class__.__name__}')
         self._field_content = field_content
         self._start = start
         self._parser = parser
