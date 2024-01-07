@@ -14,6 +14,7 @@ class TokenBase:
 
 @dataclass
 class ActiveToken(TokenBase):
+    field_content: str
     instruction: str
 
 
@@ -49,7 +50,11 @@ class SimpleLexer(LexerBase):
                     field_content=template[prev_end:mach.start()],
                     start=prev_end,
                     end=mach.start()))
-            tokens.append(ActiveToken(instruction=mach.group(1), start=mach.start(), end=mach.end()))
+            tokens.append(ActiveToken(
+                instruction=mach.group(1),
+                field_content=template[mach.start():mach.end()],
+                start=mach.start(),
+                end=mach.end()))
             prev_end = mach.end()
 
         if prev_end != len(template):
@@ -70,11 +75,11 @@ class Field(ABC):
         pass
 
     @abstractmethod
-    def __init__(self, field_content: str, start: int, parser: Parser):
-        if not self.match(field_content):
+    def __init__(self, instruction: str, start: int, parser: Parser):
+        if not self.match(instruction):
             raise self.FieldInitError(
-                f'Field content {field_content} does not match field type {self.__class__.__name__}')
-        self._field_content = field_content
+                f'Field content {instruction} does not match field type {self.__class__.__name__}')
+        self._instruction = instruction
         self._start = start
         self._parser = parser
         self._factory = parser.factory
@@ -92,12 +97,12 @@ class Field(ABC):
         return self._start
 
     @property
-    def field_content(self) -> str:
-        return self._field_content
+    def instruction(self) -> str:
+        return self._instruction
 
     @classmethod
     def init(cls, field_content: str, start: int, parser: Parser) -> Self:
-        cls(field_content, start, parser)
+        return cls(field_content, start, parser)
 
     @classmethod
     @abstractmethod
