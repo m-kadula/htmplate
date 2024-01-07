@@ -36,6 +36,27 @@ class LexerBase(ABC):
         pass
 
 
+class SimpleLexer(LexerBase):
+
+    def tokenize(self, template: str) -> list[TokenBase]:
+        tokens = []
+        prev_end = 0
+        tag_reg = re.compile(self.left_delimiter + r'(.+?)' + self.right_delimiter)
+
+        for mach in tag_reg.finditer(template):
+            if prev_end != mach.start():
+                tokens.append(InactiveToken(
+                    field_content=template[prev_end:mach.start()],
+                    start=prev_end,
+                    end=mach.start()))
+            tokens.append(ActiveToken(instruction=mach.group(1), start=mach.start(), end=mach.end()))
+            prev_end = mach.end()
+
+        if prev_end != len(template):
+            tokens.append(InactiveToken(field_content=template[prev_end:], start=prev_end, end=len(template)))
+        return tokens
+
+
 class ParsingError(Exception):
     pass
 
@@ -48,6 +69,7 @@ class Field(ABC):
     class FieldRenderError(ParsingError):
         pass
 
+    @abstractmethod
     def __init__(self, field_content: str, start: int, parser: Parser):
         if not self.match(field_content):
             raise self.FieldInitError(
