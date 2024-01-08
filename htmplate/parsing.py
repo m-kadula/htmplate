@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any, Self
+from typing import Any, Self, Callable, NewType
+from types import MethodType
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
 import re
@@ -10,27 +11,23 @@ import re
 class TokenBase:
     start: int
     end: int
+    field_content: str
 
 
 @dataclass
 class ActiveToken(TokenBase):
-    field_content: str
     instruction: str
 
 
 @dataclass
 class InactiveToken(TokenBase):
-    field_content: str
+    pass
 
 
 class LexerBase(ABC):
 
     class LexerError(Exception):
         pass
-
-    def __init__(self, left_delimiter: str, right_delimiter: str):
-        self.left_delimiter = left_delimiter
-        self.right_delimiter = right_delimiter
 
     @abstractmethod
     def tokenize(self, template: str) -> list[TokenBase]:
@@ -40,9 +37,11 @@ class LexerBase(ABC):
 class SimpleLexer(LexerBase):
 
     def tokenize(self, template: str) -> list[TokenBase]:
+        LEFT_DELIMITER = '{{'
+        RIGHT_DELIMITER = '}}'
         tokens = []
         prev_end = 0
-        tag_reg = re.compile(self.left_delimiter + r'(.+?)' + self.right_delimiter)
+        tag_reg = re.compile(LEFT_DELIMITER + r'(.+?)' + RIGHT_DELIMITER)
 
         for mach in tag_reg.finditer(template):
             if prev_end != mach.start():
@@ -62,133 +61,190 @@ class SimpleLexer(LexerBase):
         return tokens
 
 
-class ParsingError(Exception):
-    pass
-
-
-class Field(ABC):
-
-    class FieldInitError(ParsingError):
-        pass
-
-    class FieldRenderError(ParsingError):
-        pass
-
-    @abstractmethod
-    def __init__(self, instruction: str, start: int, parser: Parser):
-        if not self.match(instruction):
-            raise self.FieldInitError(
-                f'Field content {instruction} does not match field type {self.__class__.__name__}')
-        self._instruction = instruction
-        self._start = start
-        self._parser = parser
-        self._factory = parser.factory
-
-    @property
-    def parser(self) -> Parser:
-        return self._parser
-
-    @property
-    def factory(self) -> ParserFactory:
-        return self._factory
-
-    @property
-    def start(self) -> int:
-        return self._start
-
-    @property
-    def instruction(self) -> str:
-        return self._instruction
-
-    @classmethod
-    def init(cls, field_content: str, start: int, parser: Parser) -> Self:
-        return cls(field_content, start, parser)
-
-    @classmethod
-    @abstractmethod
-    def match(cls, text: str) -> bool:
-        pass
-
-    @abstractmethod
-    def render(self, context: Any, **extra_context) -> tuple[str, int]:
-        pass
-
-
-class TrapField:
-
-    def __init__(self, regex: str):
-        self.regex = regex
-        self._compiled = re.compile(regex)
-
-    def is_trap_field(self, field: str) -> bool:
-        return self._compiled.fullmatch(field) is not None
-
-
-class ParserFactory:
-
-    def __init__(self, lexer: LexerBase, fields: list[type[Field]]):
-        self.lexer = lexer
-        self.fields = fields
-
-    def get_parser(self, text: str) -> Parser:
-        return Parser(self, self.lexer.tokenize(text), self.fields)
-
-    def parse(self, text: str, context: Any, **extra_context) -> str:  # TODO: check if correct
-        parser = Parser(self, self.lexer.tokenize(text), self.fields)
-        return parser.parse_until(0, [], context, **extra_context)[0]
+# PARSER ========================================================
 
 
 class Parser:
+    ...
 
-    def __init__(self, factory: ParserFactory, tokens: list[TokenBase], field_types: list[type[Field]]):
-        self.factory = factory
+
+class TreeNode(ABC):
+
+    def __init__(self, parser: Parser, tokens: list[TokenBase], fields_t: list[type[Field]], extra_context: Any = None):
+        self.parser = parser
         self.tokens = tokens
-        self.field_types = field_types
+        self.fields_t = fields_t
+        self.extra_context = extra_context
 
-    def _get_field(self, token: ActiveToken) -> type[Field]:
-        lst = [field for field in self.field_types if field.match(token.instruction)]
-        if len(lst) == 0:
-            raise ParsingError(f'No field type matched {token.instruction}')
-        elif len(lst) == 1:
-            return lst[0]
-        else:
-            raise ParsingError(f'Multiple field types matched {token.instruction}')
+    @abstractmethod
+    def make_tree(self, start: int) -> Self:
+        pass
 
-    @staticmethod
-    def _get_trap_field(regex: str, trap_fields: list[TrapField]) -> TrapField | None:
-        lst = [trap_field for trap_field in trap_fields if trap_field.is_trap_field(regex)]
-        if len(lst) == 0:
-            return None
-        elif len(lst) == 1:
-            return lst[0]
-        else:
-            raise ParsingError(f'Multiple trap fields matched {regex}')
+    @abstractmethod
+    def render(self, context: Any) -> str:
+        pass
 
-    def parse_until(self, start: int, trap_fields: list[TrapField],
-                    context: Any, **extra_context) -> tuple[str, int, TrapField]:
-        text = []
-        i = start
-        while i < len(self.tokens):
-            token = self.tokens[i]
 
-            if isinstance(token, InactiveToken):
-                text.append(token.field_content)
-                i += 1
+class _FieldSignature:
 
-            elif isinstance(token, ActiveToken):
+    def __init__(self, owner: type[Field], signature: str, func: Field.FieldMethod):
+        self.owner = owner
+        self.signature = signature
+        self.func = func
 
-                trap = self._get_trap_field(token.instruction, trap_fields)
-                if trap is not None:
-                    return ''.join(text), i, trap
+    def __get__(self, instance: Field, owner: type[Field]):
+        if instance is None:
+            return self
+        return MethodType(self, instance)
 
-                field_t = self._get_field(token)
-                field = field_t.init(token.instruction, i, self)
-                rendered, end = field.render(context, **extra_context)
-                text.append(rendered)
-                i = end
-                continue
+    def __call__(self, instruction: str, control: Field.ControlFlowInfo):
+        return self.func(instruction, control)
 
-            else:
-                raise RuntimeError(f'Unknown token type {type(token)}')
+    def match(self, text: str) -> bool:
+        regex = re.compile(self.signature)
+        return regex.match(text) is not None
 
-        return ''.join(text), i, None
+
+class InitialField(_FieldSignature):
+    pass
+
+
+class MiddleField(_FieldSignature):
+    pass
+
+
+class FinalField(_FieldSignature):
+    pass
+
+
+class Field(ABC, TreeNode):
+
+    @dataclass
+    class ControlFlowInfo:
+        context: Any
+        extra_context: Any
+        index: int
+
+    FieldMethod = NewType('FieldMethod', Callable[[str, ControlFlowInfo], ControlFlowInfo])
+
+    @classmethod
+    def initial(cls, regex: str) -> Callable[[FieldMethod], InitialField]:
+
+        def decorator(method: Field.FieldMethod) -> InitialField:
+            tmp = InitialField(cls, regex, method)
+            cls._initial_fields.append(tmp)
+            return tmp
+        return decorator
+
+    @classmethod
+    def middle(cls, regex: str) -> Callable[[FieldMethod], MiddleField]:
+        def decorator(method: Field.FieldMethod) -> MiddleField:
+            tmp = MiddleField(cls, regex, method)
+            cls._middle_fields.append(tmp)
+            return tmp
+        return decorator
+
+    @classmethod
+    def final(cls, regex: str) -> Callable[[FieldMethod], FinalField]:
+        def decorator(method: Field.FieldMethod) -> FinalField:
+            tmp = FinalField(cls, regex, method)
+            cls._final_fields.append(tmp)
+            return tmp
+        return decorator
+
+    _initial_fields: list[InitialField] = []
+    _middle_fields: list[MiddleField] = []
+    _final_fields: list[FinalField] = []
+
+    def __init__(self, tokens: list[TokenBase]):
+        self.tokens = tokens
+        self.inner_field: ContentNode = None
+
+    @classmethod
+    def initial_fields(cls) -> list[InitialField]:
+        return cls._initial_fields.copy()
+
+    @classmethod
+    def middle_fields(cls) -> list[MiddleField]:
+        return cls._initial_fields.copy()
+
+    @classmethod
+    def final_fields(cls) -> list[FinalField]:
+        return cls._initial_fields.copy()
+
+    @classmethod
+    def all_fields(cls) -> list[_FieldSignature]:
+        return cls.initial_fields() + cls.middle_fields() + cls.final_fields()
+
+    @abstractmethod
+    def start_context(self):
+        pass
+
+    @abstractmethod
+    def check_context(self, signature: _FieldSignature):
+        pass
+
+    def make_tree(self, start: int) -> Self:
+        self.start_context()
+        current_token = self.tokens[start]
+        assert isinstance(current_token, ActiveToken)
+
+        match = next((f for f in self.all_fields() if f.match(current_token.instruction)), None)
+        if match is None:
+            raise Exception  # TODO: raise exception
+
+        self.check_context(match)
+        self.inner_field = ContentNode(self.parser, self.tokens, self.fields_t, self.extra_context)
+
+
+class FieldNode(TreeNode):
+
+    def __init__(self, parser: Parser, tokens: list[TokenBase], fields_t: list[type[Field]], extra_context: Any = None):
+        super().__init__(parser, tokens, fields_t, extra_context)
+        self.children: list[MiddleField] = None
+        self.field = None
+
+    def make_tree(self, start: int) -> Self:
+        ...
+
+    def render(self, context: Any) -> str:
+        ...
+
+
+class ContentNode(TreeNode):
+
+    def __init__(self, parser: Parser, tokens: list[TokenBase], fields_t: list[type[Field]], extra_context: Any = None):
+        super().__init__(parser, tokens, fields_t, extra_context)
+        self.children: list[FieldNode | LeafNode] = None
+
+    def make_tree(self, start: int) -> Self:
+        ...
+
+    def render(self, context: Any) -> str:
+        ...
+
+
+class LeafNode(TreeNode):
+
+    def __init__(self, parser: Parser, tokens: list[TokenBase], fields_t: list[type[Field]], extra_context: Any = None):
+        super().__init__(parser, tokens, fields_t, extra_context)
+        self.content: str = None
+
+    def make_tree(self, start: int) -> Self:
+        ...
+
+    def render(self, context: Any) -> str:
+        ...
+
+
+class EndNode(TreeNode):
+
+    def __init__(self, parser: Parser, tokens: list[TokenBase], fields_t: list[type[Field]], extra_context: Any = None):
+        super().__init__(parser, tokens, fields_t, extra_context)
+        self.end_field: FinalField = None
+
+    def make_tree(self, start: int) -> Self:
+        ...
+
+    def render(self, context: Any) -> str:
+        ...
