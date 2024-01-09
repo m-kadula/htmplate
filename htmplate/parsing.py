@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import Any, Self, Callable, NewType
+from typing import Any, Callable, NewType
 from types import MethodType
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from abc import ABC, abstractmethod
 import re
 
@@ -65,7 +65,23 @@ class SimpleLexer(LexerBase):
 
 
 class Parser:
-    ...
+
+    class ParsingError(Exception):
+        pass
+
+    def __init__(self, lexer: LexerBase, field_types: list[type[Field]]):
+        self.lexer = lexer
+        self.field_types = field_types
+
+    def make_tree(self, template: str, extra_context: Any = None) -> ContentNode:
+        tokens = self.lexer.tokenize(template)
+        root = ContentNode(self, tokens, self.field_types, extra_context)
+        root.make_tree(0)
+        return root
+
+    def parse(self, template: str, context: Any, **extra_context) -> str:
+        tree = self.make_tree(template, extra_context)
+        return tree.render(context)
 
 
 class TreeNode(ABC):
@@ -77,7 +93,7 @@ class TreeNode(ABC):
         self.extra_context = extra_context
 
     @abstractmethod
-    def make_tree(self, start: int) -> Self:
+    def make_tree(self, start: int) -> int:
         pass
 
     @abstractmethod
@@ -124,8 +140,9 @@ class Field(ABC, TreeNode):
         context: Any
         extra_context: Any
         index: int
+        exit_next: bool = False
 
-    FieldMethod = NewType('FieldMethod', Callable[[str, ControlFlowInfo], ControlFlowInfo])
+    FieldMethod = NewType('FieldMethod', Callable[[str, ControlFlowInfo], tuple[ControlFlowInfo, str | None]])
 
     @classmethod
     def initial(cls, regex: str) -> Callable[[FieldMethod], InitialField]:
@@ -156,9 +173,9 @@ class Field(ABC, TreeNode):
     _middle_fields: list[MiddleField] = []
     _final_fields: list[FinalField] = []
 
-    def __init__(self, tokens: list[TokenBase]):
-        self.tokens = tokens
-        self.inner_field: ContentNode = None
+    def __init__(self, parser: Parser, tokens: list[TokenBase], fields_t: list[type[Field]], extra_context: Any = None):
+        super().__init__(parser, tokens, fields_t, extra_context)
+        self.content: list[tuple[_FieldSignature, ActiveToken, ContentNode]] = None
 
     @classmethod
     def initial_fields(cls) -> list[InitialField]:
@@ -184,44 +201,90 @@ class Field(ABC, TreeNode):
     def check_context(self, signature: _FieldSignature):
         pass
 
-    def make_tree(self, start: int) -> Self:
+    def make_tree(self, start: int) -> int:
         self.start_context()
-        current_token = self.tokens[start]
-        assert isinstance(current_token, ActiveToken)
+        index = start
+        out: list[tuple[_FieldSignature, ActiveToken, ContentNode]] = []
 
-        match = next((f for f in self.all_fields() if f.match(current_token.instruction)), None)
-        if match is None:
-            raise Exception  # TODO: raise exception
+        while index < len(self.tokens):
+            current_token = self.tokens[index]
+            assert isinstance(current_token, ActiveToken)
 
-        self.check_context(match)
-        self.inner_field = ContentNode(self.parser, self.tokens, self.fields_t, self.extra_context)
+            match = next((f for f in self.all_fields() if f.match(current_token.instruction)), None)
+            if match is None:
+                raise Parser.ParsingError(f'No field found for {current_token.instruction}')
 
+            self.check_context(match)
+            if isinstance(match, (InitialField, MiddleField)):
+                content = ContentNode(self.parser, self.tokens, self.fields_t, self.extra_context)
+                index = content.make_tree(index)
+                out.append((match, current_token, content))
+            else:
+                out.append((match, current_token, None))
+                self.content = out
+                return index + 1
 
-class FieldNode(TreeNode):
-
-    def __init__(self, parser: Parser, tokens: list[TokenBase], fields_t: list[type[Field]], extra_context: Any = None):
-        super().__init__(parser, tokens, fields_t, extra_context)
-        self.children: list[MiddleField] = None
-        self.field = None
-
-    def make_tree(self, start: int) -> Self:
-        ...
+        self.check_context(None)
+        self.content = out
+        return index
 
     def render(self, context: Any) -> str:
-        ...
+        out: list[str] = []
+        control = self.ControlFlowInfo(context, self.extra_context, 0)
+        while not control.exit_next:
+            signature, token, node = self.content[control.index]
+            control, inner_render = signature(token.instruction, replace(control))
+            if inner_render is not None:
+                out.append(inner_render)
+        return ''.join(out)
 
 
 class ContentNode(TreeNode):
 
     def __init__(self, parser: Parser, tokens: list[TokenBase], fields_t: list[type[Field]], extra_context: Any = None):
         super().__init__(parser, tokens, fields_t, extra_context)
-        self.children: list[FieldNode | LeafNode] = None
+        self.children: list[Field | LeafNode | ContentNode] = None
 
-    def make_tree(self, start: int) -> Self:
-        ...
+    def _get_field(self, instruction: str) -> type[Field]:
+        for field_t in self.fields_t:
+            fields = field_t.all_fields()
+            tmp = next((f for f in fields if f.match(instruction)), None)
+            if tmp is not None:
+                return field_t
+        raise Exception  # TODO: raise exception
+
+    def make_tree(self, start: int) -> int:
+        out: list[Field | LeafNode | ContentNode] = []
+
+        current = start
+        while current < len(self.tokens):
+            token = self.tokens[current]
+
+            if isinstance(token, ActiveToken):
+                field_t: type[Field] = self._get_field(token.instruction)
+                if isinstance(field_t, (FinalField, MiddleField)):
+                    self.children = out
+                    return current
+                field = field_t(self.parser, self.tokens, self.fields_t, self.extra_context)
+                current = field.make_tree(current)
+                out.append(field)
+
+            elif isinstance(token, InactiveToken):
+                child = LeafNode(self.parser, self.tokens, self.fields_t, self.extra_context)
+                current = child.make_tree(current)
+                out.append(child)
+
+            else:
+                raise TypeError(f'Unknown token type {type(token)}')
+
+        self.children = out
+        return current
 
     def render(self, context: Any) -> str:
-        ...
+        out: list[str] = []
+        for child in self.children:
+            out.append(child.render(context))
+        return ''.join(out)
 
 
 class LeafNode(TreeNode):
@@ -230,21 +293,11 @@ class LeafNode(TreeNode):
         super().__init__(parser, tokens, fields_t, extra_context)
         self.content: str = None
 
-    def make_tree(self, start: int) -> Self:
-        ...
+    def make_tree(self, start: int) -> int:
+        token = self.tokens[start]
+        assert isinstance(token, InactiveToken)
+        self.content = token.field_content
+        return start + 1
 
     def render(self, context: Any) -> str:
-        ...
-
-
-class EndNode(TreeNode):
-
-    def __init__(self, parser: Parser, tokens: list[TokenBase], fields_t: list[type[Field]], extra_context: Any = None):
-        super().__init__(parser, tokens, fields_t, extra_context)
-        self.end_field: FinalField = None
-
-    def make_tree(self, start: int) -> Self:
-        ...
-
-    def render(self, context: Any) -> str:
-        ...
+        return self.content
