@@ -176,10 +176,46 @@ def end_if_stmt(field: ControlField, control: ControlField.ControlFlowInfo) -> t
     return control, None
 
 
+class ContextField(ControlField):
+
+    def start_context(self) -> ControlField.Storage:
+        return ControlField.Storage()
+
+    def check_context(self, storage: ControlField.Storage, signature: ControlFieldSignature):
+        pass
+
+    def start_internal_storage(self):
+        pass
+
+
+@ContextField.initial('context', r'\s*context\s+([0-9a-zA-Z_]+)\s*')
+def context_stmt(field: ControlField, control: ControlField.ControlFlowInfo) \
+        -> tuple[ControlField.ControlFlowInfo, str]:
+    sig, token, content_node = field.get_elements(control)
+    reg = re.compile(sig.signature)
+    match = reg.match(token.instruction)
+    value = match.group(1)
+    if value in control.context:
+        value = control.context[value]
+        control.exit_next = True
+        return control, content_node.render(context=value)
+    else:
+        control.exit_next = True
+        return (control, field.content[0][1].field_content +
+                content_node.render({}) + field.content[1][1].field_content)
+
+
+@ContextField.final('end context', r'\s*end\s+context\s*')
+def end_context_stmt(field: ControlField, control: ControlField.ControlFlowInfo) \
+        -> tuple[ControlField.ControlFlowInfo, str]:
+    control.exit_next = True
+    return control, None
+
+
 class TreeTest(unittest.TestCase):
 
     def setUp(self):
-        self.parser = Parser(SimpleLexer(), [DataField, IterField, ConditionalField])
+        self.parser = Parser(SimpleLexer(), [DataField, IterField, ConditionalField, ContextField])
 
     def test_basic(self):
         text = "test {{ test }}"
@@ -241,7 +277,7 @@ signature='\\\\\\\\s*end\\\\\\\\s+for\\\\\\\\s*'>",
 class ParsingTest(unittest.TestCase):
 
     def setUp(self):
-        self.parser = Parser(SimpleLexer(), [DataField, IterField, ConditionalField])
+        self.parser = Parser(SimpleLexer(), [DataField, IterField, ConditionalField, ContextField])
 
     def test_basic(self):
         text = "Hi, my name is {{ name }}. and I am from {{ country }}. I am {{ age }} years old."
@@ -319,6 +355,17 @@ class ParsingTest(unittest.TestCase):
         context = {'condition1': True, 'condition2': False, 'name1': 'John', 'name2': 'Mike'}
         parsed = self.parser.parse(text, context)
         self.assertEqual(parsed, 'John')
+
+    def test_context(self):
+        text = "{{ context context_name }}{{ name }}{{ end context }}"
+        context = {'context_name': {'name': 'John'}}
+        parsed = self.parser.parse(text, context)
+        self.assertEqual(parsed, 'John')
+
+        text = "{{ context null }}{{ name }}{{ end context }}"
+        context = {'context_name': {'name': 'John'}}
+        parsed = self.parser.parse(text, context)
+        self.assertEqual(parsed, text)
 
 
 if __name__ == '__main__':
