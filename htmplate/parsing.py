@@ -111,7 +111,7 @@ class TreeNode(ABC):
     def to_json(self) -> Any:
         pass
 
-    def __repr__(self):
+    def to_json_str(self) -> str:
         return json.dumps(self.to_json(), indent=4)
 
 
@@ -133,7 +133,12 @@ class ControlFieldSignature(FieldSignature):
         MIDDLE = 1
         FINAL = 2
 
-    def __init__(self, f_type: FieldType, owner: type[ControlField], signature: str, func: ControlField.FieldMethod):
+    def __init__(self, name: str,
+                 f_type: FieldType,
+                 owner: type[ControlField],
+                 signature: str,
+                 func: ControlField.FieldMethod):
+        self.name = name
         self.owner = owner
         self.signature = signature
         self.func = func
@@ -184,17 +189,24 @@ class Field(TreeNode):
 
 
 class ControlField(Field):
+    class Storage(dict):
+
+        def __getattr__(self, name):
+            return self[name]
+
+        def __setattr__(self, name, value):
+            self[name] = value
+
+        def __delattr__(self, item):
+            del self[item]
 
     @dataclass
     class ControlFlowInfo:
-        class Storage:
-            pass
-
         context: Any
         mut_context: Any
         extra_context: Any
         index: int
-        internal: Any
+        internal: ControlField.Storage
         exit_next: bool = False
 
     FieldMethod = NewType('FieldMethod', Callable[[Self, ControlFlowInfo], tuple[ControlFlowInfo, str | None]])
@@ -206,25 +218,25 @@ class ControlField(Field):
         cls.final_fields = []
 
     @classmethod
-    def initial(cls, regex: str) -> Callable[[FieldMethod], ControlFieldSignature]:
+    def initial(cls, name: str, regex: str) -> Callable[[FieldMethod], ControlFieldSignature]:
         def decorator(method: ControlField.FieldMethod) -> ControlFieldSignature:
-            tmp = ControlFieldSignature(ControlFieldSignature.FieldType.INITIAL, cls, regex, method)
+            tmp = ControlFieldSignature(name, ControlFieldSignature.FieldType.INITIAL, cls, regex, method)
             cls.initial_fields.append(tmp)
             return tmp
         return decorator
 
     @classmethod
-    def middle(cls, regex: str) -> Callable[[FieldMethod], ControlFieldSignature]:
+    def middle(cls, name: str, regex: str) -> Callable[[FieldMethod], ControlFieldSignature]:
         def decorator(method: ControlField.FieldMethod) -> ControlFieldSignature:
-            tmp = ControlFieldSignature(ControlFieldSignature.FieldType.MIDDLE, cls, regex, method)
+            tmp = ControlFieldSignature(name, ControlFieldSignature.FieldType.MIDDLE, cls, regex, method)
             cls.middle_fields.append(tmp)
             return tmp
         return decorator
 
     @classmethod
-    def final(cls, regex: str) -> Callable[[FieldMethod], ControlFieldSignature]:
+    def final(cls, name: str, regex: str) -> Callable[[FieldMethod], ControlFieldSignature]:
         def decorator(method: ControlField.FieldMethod) -> ControlFieldSignature:
-            tmp = ControlFieldSignature(ControlFieldSignature.FieldType.FINAL, cls, regex, method)
+            tmp = ControlFieldSignature(name, ControlFieldSignature.FieldType.FINAL, cls, regex, method)
             cls.final_fields.append(tmp)
             return tmp
         return decorator
@@ -263,15 +275,19 @@ class ControlField(Field):
         return self.content[control.index]
 
     @abstractmethod
-    def start_context(self):
+    def start_internal_storage(self) -> Storage:
         pass
 
     @abstractmethod
-    def check_context(self, signature: ControlFieldSignature):
+    def start_context(self) -> Storage:
+        pass
+
+    @abstractmethod
+    def check_context(self, storage: Storage, signature: ControlFieldSignature) -> Storage:
         pass
 
     def make_tree(self, start: int) -> int:
-        self.start_context()
+        storage = self.start_context()
         index = start
         out: list[tuple[ControlFieldSignature, ActiveToken, ContentNode]] = []
 
@@ -283,7 +299,7 @@ class ControlField(Field):
             if match is None:
                 raise Parser.ParsingError(f'No field found for {current_token.instruction}')
 
-            self.check_context(match)
+            storage = self.check_context(storage, match)
             if match.f_type in [ControlFieldSignature.FieldType.INITIAL, ControlFieldSignature.FieldType.MIDDLE]:
                 content = ContentNode(self.parser, self.tokens, self.fields_t, self.extra_context)
                 index = content.make_tree(index + 1)
@@ -297,7 +313,7 @@ class ControlField(Field):
 
     def render(self, context: Any) -> str:
         out: list[str] = []
-        control = self.ControlFlowInfo(context, None, self.extra_context, 0, self.ControlFlowInfo.Storage())
+        control = self.ControlFlowInfo(context, None, self.extra_context, 0, self.start_internal_storage())
         while not control.exit_next:
             signature, token, node = self.content[control.index]
             control, inner_render = signature(self, replace(control))
