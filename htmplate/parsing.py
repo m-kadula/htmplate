@@ -69,7 +69,7 @@ class Parser:
     class ParsingError(Exception):
         pass
 
-    def __init__(self, lexer: LexerBase, field_types: list[type[Field]]):
+    def __init__(self, lexer: LexerBase, field_types: list[type[ControlField]]):
         self.lexer = lexer
         self.field_types = field_types
 
@@ -86,7 +86,7 @@ class Parser:
 
 class TreeNode(ABC):
 
-    def __init__(self, parser: Parser, tokens: list[TokenBase], fields_t: list[type[Field]], extra_context: Any = None):
+    def __init__(self, parser: Parser, tokens: list[TokenBase], fields_t: list[type[ControlField]], extra_context: Any = None):
         self.parser = parser
         self.tokens = tokens
         self.fields_t = fields_t
@@ -101,19 +101,19 @@ class TreeNode(ABC):
         pass
 
 
-class _FieldSignature:
+class FieldSignature:
 
-    def __init__(self, owner: type[Field], signature: str, func: Field.FieldMethod):
+    def __init__(self, owner: type[ControlField], signature: str, func: ControlField.FieldMethod):
         self.owner = owner
         self.signature = signature
         self.func = func
 
-    def __get__(self, instance: Field, owner: type[Field]):
+    def __get__(self, instance: ControlField, owner: type[ControlField]):
         if instance is None:
             return self
         return MethodType(self, instance)
 
-    def __call__(self, instruction: str, control: Field.ControlFlowInfo):
+    def __call__(self, instruction: str, control: ControlField.ControlFlowInfo):
         return self.func(instruction, control)
 
     def match(self, text: str) -> bool:
@@ -121,19 +121,23 @@ class _FieldSignature:
         return regex.match(text) is not None
 
 
-class InitialField(_FieldSignature):
+class InitialFieldSignature(FieldSignature):
     pass
 
 
-class MiddleField(_FieldSignature):
+class MiddleFieldSignature(FieldSignature):
     pass
 
 
-class FinalField(_FieldSignature):
+class FinalFieldSignature(FieldSignature):
     pass
 
 
 class Field(ABC, TreeNode):
+    ...
+
+
+class ControlField(ABC, TreeNode):
 
     @dataclass
     class ControlFlowInfo:
@@ -145,52 +149,52 @@ class Field(ABC, TreeNode):
     FieldMethod = NewType('FieldMethod', Callable[[str, ControlFlowInfo], tuple[ControlFlowInfo, str | None]])
 
     @classmethod
-    def initial(cls, regex: str) -> Callable[[FieldMethod], InitialField]:
+    def initial(cls, regex: str) -> Callable[[FieldMethod], InitialFieldSignature]:
 
-        def decorator(method: Field.FieldMethod) -> InitialField:
-            tmp = InitialField(cls, regex, method)
+        def decorator(method: ControlField.FieldMethod) -> InitialFieldSignature:
+            tmp = InitialFieldSignature(cls, regex, method)
             cls._initial_fields.append(tmp)
             return tmp
         return decorator
 
     @classmethod
-    def middle(cls, regex: str) -> Callable[[FieldMethod], MiddleField]:
-        def decorator(method: Field.FieldMethod) -> MiddleField:
-            tmp = MiddleField(cls, regex, method)
+    def middle(cls, regex: str) -> Callable[[FieldMethod], MiddleFieldSignature]:
+        def decorator(method: ControlField.FieldMethod) -> MiddleFieldSignature:
+            tmp = MiddleFieldSignature(cls, regex, method)
             cls._middle_fields.append(tmp)
             return tmp
         return decorator
 
     @classmethod
-    def final(cls, regex: str) -> Callable[[FieldMethod], FinalField]:
-        def decorator(method: Field.FieldMethod) -> FinalField:
-            tmp = FinalField(cls, regex, method)
+    def final(cls, regex: str) -> Callable[[FieldMethod], FinalFieldSignature]:
+        def decorator(method: ControlField.FieldMethod) -> FinalFieldSignature:
+            tmp = FinalFieldSignature(cls, regex, method)
             cls._final_fields.append(tmp)
             return tmp
         return decorator
 
-    _initial_fields: list[InitialField] = []
-    _middle_fields: list[MiddleField] = []
-    _final_fields: list[FinalField] = []
+    _initial_fields: list[InitialFieldSignature] = []
+    _middle_fields: list[MiddleFieldSignature] = []
+    _final_fields: list[FinalFieldSignature] = []
 
-    def __init__(self, parser: Parser, tokens: list[TokenBase], fields_t: list[type[Field]], extra_context: Any = None):
+    def __init__(self, parser: Parser, tokens: list[TokenBase], fields_t: list[type[ControlField]], extra_context: Any = None):
         super().__init__(parser, tokens, fields_t, extra_context)
-        self.content: list[tuple[_FieldSignature, ActiveToken, ContentNode]] = None
+        self.content: list[tuple[FieldSignature, ActiveToken, ContentNode]] = None
 
     @classmethod
-    def initial_fields(cls) -> list[InitialField]:
+    def initial_fields(cls) -> list[InitialFieldSignature]:
         return cls._initial_fields.copy()
 
     @classmethod
-    def middle_fields(cls) -> list[MiddleField]:
+    def middle_fields(cls) -> list[MiddleFieldSignature]:
         return cls._initial_fields.copy()
 
     @classmethod
-    def final_fields(cls) -> list[FinalField]:
+    def final_fields(cls) -> list[FinalFieldSignature]:
         return cls._initial_fields.copy()
 
     @classmethod
-    def all_fields(cls) -> list[_FieldSignature]:
+    def all_fields(cls) -> list[FieldSignature]:
         return cls.initial_fields() + cls.middle_fields() + cls.final_fields()
 
     @abstractmethod
@@ -198,13 +202,13 @@ class Field(ABC, TreeNode):
         pass
 
     @abstractmethod
-    def check_context(self, signature: _FieldSignature):
+    def check_context(self, signature: FieldSignature):
         pass
 
     def make_tree(self, start: int) -> int:
         self.start_context()
         index = start
-        out: list[tuple[_FieldSignature, ActiveToken, ContentNode]] = []
+        out: list[tuple[FieldSignature, ActiveToken, ContentNode]] = []
 
         while index < len(self.tokens):
             current_token = self.tokens[index]
@@ -215,7 +219,7 @@ class Field(ABC, TreeNode):
                 raise Parser.ParsingError(f'No field found for {current_token.instruction}')
 
             self.check_context(match)
-            if isinstance(match, (InitialField, MiddleField)):
+            if isinstance(match, (InitialFieldSignature, MiddleFieldSignature)):
                 content = ContentNode(self.parser, self.tokens, self.fields_t, self.extra_context)
                 index = content.make_tree(index)
                 out.append((match, current_token, content))
@@ -239,30 +243,46 @@ class Field(ABC, TreeNode):
         return ''.join(out)
 
 
+class SingleField(ABC, TreeNode):
+
+    def __init__(self, parser: Parser, tokens: list[TokenBase], fields_t: list[type[ControlField]], extra_context: Any = None):
+        super().__init__(parser, tokens, fields_t, extra_context)
+        self.content: str = None
+
+    @classmethod
+    def get_field(cls) -> InitialFieldSignature:
+        ...
+
+    @classmethod
+    @abstractmethod
+    def match(cls, instruction: str) -> bool:
+        pass
+
+
 class ContentNode(TreeNode):
 
-    def __init__(self, parser: Parser, tokens: list[TokenBase], fields_t: list[type[Field]], extra_context: Any = None):
+    def __init__(self, parser: Parser, tokens: list[TokenBase], fields_t: list[type[ControlField]], extra_context: Any = None):
         super().__init__(parser, tokens, fields_t, extra_context)
-        self.children: list[Field | LeafNode | ContentNode] = None
+        self.children: list[ControlField | LeafNode | ContentNode] = None
 
-    def _get_field(self, instruction: str) -> type[Field]:
+    def _get_field(self, instruction: str) -> type[ControlField]:
         for field_t in self.fields_t:
             fields = field_t.all_fields()
             tmp = next((f for f in fields if f.match(instruction)), None)
             if tmp is not None:
                 return field_t
-        raise Exception  # TODO: raise exception
+        raise Parser.ParsingError(f'No field found for {instruction}')
 
     def make_tree(self, start: int) -> int:
-        out: list[Field | LeafNode | ContentNode] = []
+        out: list[ControlField | LeafNode | ContentNode] = []
 
         current = start
         while current < len(self.tokens):
             token = self.tokens[current]
 
             if isinstance(token, ActiveToken):
-                field_t: type[Field] = self._get_field(token.instruction)
-                if isinstance(field_t, (FinalField, MiddleField)):
+                field_t: type[ControlField] = self._get_field(token.instruction)
+                if isinstance(field_t, (FinalFieldSignature, MiddleFieldSignature)):
                     self.children = out
                     return current
                 field = field_t(self.parser, self.tokens, self.fields_t, self.extra_context)
@@ -289,7 +309,7 @@ class ContentNode(TreeNode):
 
 class LeafNode(TreeNode):
 
-    def __init__(self, parser: Parser, tokens: list[TokenBase], fields_t: list[type[Field]], extra_context: Any = None):
+    def __init__(self, parser: Parser, tokens: list[TokenBase], fields_t: list[type[ControlField]], extra_context: Any = None):
         super().__init__(parser, tokens, fields_t, extra_context)
         self.content: str = None
 
