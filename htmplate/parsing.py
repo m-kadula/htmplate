@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from enum import Enum
 from typing import Any, Callable, NewType, Self
+import json
 from types import MethodType
 from dataclasses import dataclass, replace
 from abc import ABC, abstractmethod
@@ -13,6 +14,9 @@ class TokenBase:
     start: int
     end: int
     field_content: str
+
+    def __repr__(self):
+        return f'<{self.__class__.__name__} field_content={self.field_content!r}>'
 
 
 @dataclass
@@ -103,6 +107,13 @@ class TreeNode(ABC):
     def render(self, context: Any) -> str:
         pass
 
+    @abstractmethod
+    def to_json(self) -> Any:
+        pass
+
+    def __repr__(self):
+        return json.dumps(self.to_json(), indent=4)
+
 
 class FieldSignature(ABC):
 
@@ -128,6 +139,9 @@ class ControlFieldSignature(FieldSignature):
         self.func = func
         self.f_type = f_type
 
+    def __repr__(self):
+        return f'<{self.__class__.__name__} type={self.f_type} signature={self.signature!r}>'
+
     def __get__(self, instance: ControlField, owner: type[ControlField]):
         if instance is None:
             return self
@@ -149,6 +163,9 @@ class SingleFieldSignature(FieldSignature):
     def __init__(self, owner: type[SingleField], signature: str):
         self.owner = owner
         self.signature = signature
+
+    def __repr__(self):
+        return f'<{self.__class__.__name__} signature={self.signature!r}>'
 
     def match(self, text: str) -> bool:
         regex = re.compile(self.signature)
@@ -220,6 +237,17 @@ class ControlField(Field):
     def __init__(self, parser: Parser, tokens: list[TokenBase], fields_t: list[type[Field]], extra_context: Any = None):
         super().__init__(parser, tokens, fields_t, extra_context)
         self.content: list[tuple[ControlFieldSignature, ActiveToken, ContentNode]] = None
+
+    def to_json(self) -> Any:
+        out = []
+        for signature, token, node in self.content:
+            current = {
+                'signature': repr(signature),
+                'token': repr(token),
+                'content': node.to_json() if node is not None else None
+            }
+            out.append(current)
+        return {"type": self.__class__.__name__, "content": out}
 
     @classmethod
     def initial_fields(cls) -> list[ControlFieldSignature]:
@@ -297,6 +325,9 @@ class SingleField(Field):
         super().__init__(parser, tokens, fields_t, extra_context)
         self.content: ActiveToken | None = None
 
+    def to_json(self) -> Any:
+        return {"type": self.__class__.__name__, "content": repr(self.content)}
+
     @classmethod
     @abstractmethod
     def get_regex(cls) -> str:
@@ -333,6 +364,12 @@ class ContentNode(TreeNode):
     def __init__(self, parser: Parser, tokens: list[TokenBase], fields_t: list[type[Field]], extra_context: Any = None):
         super().__init__(parser, tokens, fields_t, extra_context)
         self.children: list[Field | LeafNode | ContentNode] = None
+
+    def to_json(self) -> Any:
+        out = []
+        for child in self.children:
+            out.append(child.to_json())
+        return {"type": self.__class__.__name__, "content": out}
 
     def _get_field(self, instruction: str) -> tuple[type[Field], ControlFieldSignature]:
         for field_t in self.fields_t:
@@ -381,6 +418,9 @@ class LeafNode(TreeNode):
     def __init__(self, parser: Parser, tokens: list[TokenBase], fields_t: list[type[Field]], extra_context: Any = None):
         super().__init__(parser, tokens, fields_t, extra_context)
         self.content: InactiveToken = None
+
+    def to_json(self) -> Any:
+        return {"type": self.__class__.__name__, "content": repr(self.content)}
 
     def make_tree(self, start: int) -> int:
         token = self.tokens[start]

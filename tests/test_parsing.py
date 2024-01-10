@@ -105,6 +105,23 @@ def final(field: ControlField, control: ControlField.ControlFlowInfo) -> tuple[C
         return control, ''
 
 
+class TreeTest(unittest.TestCase):
+
+    def setUp(self):
+        self.parser = Parser(SimpleLexer(), [DataField, IterField])
+
+    def test_basic(self):
+        text = "Hi, my name is {{ name }}. and I am from {{ country }}. I am {{ age }} years old."
+        tree = self.parser.make_tree(text)
+        print(repr(tree))
+
+    def test_nesting(self):
+        text = ("Hi, my name is {{ name }}. I like: {{ for item in items }}{{ item }}, {{ end for }}. "
+                "I am {{ age }} years old.")
+        tree = self.parser.make_tree(text)
+        print(repr(tree))
+
+
 class ParsingTest(unittest.TestCase):
 
     def setUp(self):
