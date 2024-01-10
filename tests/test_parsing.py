@@ -1,4 +1,3 @@
-import re
 import unittest
 
 from htmplate.parsing import *
@@ -8,7 +7,7 @@ class SimpleLexerTest(unittest.TestCase):
 
     def test_basic(self):
         text = "Hi, my name is {{name}}. and I am from {{country}}. I am {{age}} years old."
-        lexer = SimpleLexer('{{', '}}')
+        lexer = SimpleLexer()
         tokens = lexer.tokenize(text)
         it = lambda x, y, z: InactiveToken(field_content=x, start=y, end=z)
         at = lambda x, t, y, z: ActiveToken(instruction=x, field_content=t, start=y, end=z)
@@ -24,140 +23,127 @@ class SimpleLexerTest(unittest.TestCase):
 
     def test_empty(self):
         text = ""
-        lexer = SimpleLexer('{{', '}}')
+        lexer = SimpleLexer()
         tokens = lexer.tokenize(text)
         self.assertEqual(tokens, [])
 
     def test_no_tags(self):
         text = "Hi, my name is John. and I am from USA. I am 20 years old."
-        lexer = SimpleLexer('{{', '}}')
+        lexer = SimpleLexer()
         tokens = lexer.tokenize(text)
         self.assertEqual(tokens, [InactiveToken(field_content=text, start=0, end=len(text))])
 
     def test_only_tags(self):
         text = "{{name}}{{country}}{{age}}"
-        lexer = SimpleLexer('{{', '}}')
+        lexer = SimpleLexer()
         tokens = lexer.tokenize(text)
         self.assertEqual(tokens, [ActiveToken(instruction='name', field_content='{{name}}', start=0, end=8),
                                   ActiveToken(instruction='country', field_content='{{country}}', start=8, end=19),
                                   ActiveToken(instruction='age', field_content='{{age}}', start=19, end=26)])
 
 
-class DataField(Field):
-    regex = r'^\s([a-zA-Z0-9_]+?)\s*$'
-
-    def __init__(self, instruction: str, start: int, parser: Parser):
-        super().__init__(instruction, start, parser)
+class DataField(SingleField):
 
     @classmethod
-    def match(cls, text: str) -> bool:
-        regex = re.compile(cls.regex)
-        return regex.match(text) is not None
+    def get_regex(cls) -> str:
+        return r'\s*([0-9a-zA-Z_]+)\s*'
 
-    def render(self, context: Any, **extra_context) -> tuple[str, int]:
-        regex = re.compile(self.regex)
-        data = regex.match(self.instruction).group(1)
-        if data in context:
-            inner_parsed = self.factory.parse(context[data], context, **extra_context)
-            return inner_parsed, self.start + 1
+    def execute_field(self, context: Any) -> str:
+        assert isinstance(self.content, ActiveToken)
+        field = self.get_field()
+        reg = re.compile(self.get_regex())
+        match = reg.match(self.content.instruction)
+        name = match.group(1)
+        if name in context:
+            return context[name]
         else:
-            tmp = self.parser.tokens[self.start]
-            assert isinstance(tmp, ActiveToken)
-            return tmp.field_content, self.start + 1
+            return self.content.field_content
 
 
-class IterField(Field):
-    regex = r'^\s*for ([a-zA-Z0-9_]+) in ([a-zA-Z0-9_]+)\s*$'
-    trap = TrapField(r'^\s*end for\s*$')
+class IterField(ControlField):
+    def start_context(self):
+        pass
 
-    def __init__(self, instruction: str, start: int, parser: Parser):
-        super().__init__(instruction, start, parser)
+    def check_context(self, signature: ControlFieldSignature):
+        pass
 
-    @classmethod
-    def match(cls, text: str) -> bool:
-        regex = re.compile(cls.regex)
-        return regex.match(text) is not None
 
-    def find_end(self) -> int:
-        stack = []
-        for i in range(self.start + 1, len(self.parser.tokens)):
-            tmp = self.parser.tokens[i]
-            assert isinstance(tmp, (InactiveToken, ActiveToken))
-            if isinstance(tmp, ActiveToken) and self.trap.is_trap_field(tmp.instruction):
-                if len(stack) == 0:
-                    return i + 1
-                else:
-                    stack.pop()
-            elif isinstance(tmp, ActiveToken) and self.match(tmp.instruction):
-                stack.append(tmp)
-        else:
-            raise self.FieldRenderError(f'No end for found for {self.instruction}')
+@IterField.initial(r'\s*for\s+([0-9a-zA-Z_]+)\s+in\s+([0-9a-zA-Z_]+)\s*')
+def initial(field: ControlField, control: ControlField.ControlFlowInfo) -> tuple[ControlField.ControlFlowInfo, str]:
+    sig, token, content_node = field.get_elements(control)
+    reg = re.compile(sig.signature)
+    match = reg.match(token.instruction)
+    try:
+        control.internal.index
+    except AttributeError:
+        control.internal.index = 0
+        control.internal.iterable = match.group(1)
+        control.internal.iterated = match.group(2)
 
-    def render(self, context: Any, **extra_context) -> tuple[str, int]:
-        regex = re.compile(self.regex)
-        match = regex.match(self.instruction)
-        variable = match.group(1)
-        data = match.group(2)
-        end = self.find_end()
+        if control.internal.iterated not in control.context:
+            raise Parser.ParsingError(f'No iterable named {control.internal.iterared} in context')
 
-        if data not in context:
-            text = ''.join([token.field_content for token in self.parser.tokens[self.start:end]])
-            return text, end
+    if len(control.context[control.internal.iterated]) == 0:
+        control.exit_next = True
+        return control, ''
+    current = control.context[control.internal.iterated][control.internal.index]
+    mut_context = {control.internal.iterable: current}
+    content = content_node.render(mut_context | control.context)
+    control.index = 1
+    return control, content
 
-        lst = context[data]
-        if not isinstance(lst, list):
-            raise self.FieldRenderError(f'{data} is not a list')
 
-        text = []
-        for item in lst:
-            inner_context = {**context, variable: item}
-            inner_parsed, _, trap = self.parser.parse_until(self.start + 1, [self.trap], inner_context, **extra_context)
-            if trap is None:
-                raise self.FieldRenderError(f'No end for found for {self.instruction}')
-            text.append(inner_parsed)
-
-        return ''.join(text), end
+@IterField.final(r'\s*end\s+for\s*')
+def final(field: ControlField, control: ControlField.ControlFlowInfo) -> tuple[ControlField.ControlFlowInfo, str]:
+    sig, token, content_node = field.get_elements(control)
+    control.internal.index += 1
+    if control.internal.index < len(control.context[control.internal.iterated]):
+        control.index = 0
+        return control, ''
+    else:
+        control.exit_next = True
+        return control, ''
 
 
 class ParsingTest(unittest.TestCase):
 
     def setUp(self):
-        self.factory = ParserFactory(SimpleLexer('{{', '}}'), [DataField, IterField])
+        self.parser = Parser(SimpleLexer(), [DataField, IterField])
 
     def test_basic(self):
         text = "Hi, my name is {{ name }}. and I am from {{ country }}. I am {{ age }} years old."
         context = {'name': 'John', 'country': 'USA', 'age': '20'}
-        parsed = self.factory.parse(text, context)
+        parsed = self.parser.parse(text, context)
         self.assertEqual(parsed, 'Hi, my name is John. and I am from USA. I am 20 years old.')
 
     def test_nested(self):
         text = "Hi, my name is {{ name }}. and I am from {{ nested }}. I am {{ age }} years old."
         context = {'name': 'John', 'nested': "{{ country }}, {{ town }}", 'age': '20', 'country': 'USA', 'town': 'NY'}
-        parsed = self.factory.parse(text, context)
+        parsed = self.parser.parse(text, context)
         self.assertEqual(parsed, 'Hi, my name is John. and I am from USA, NY. I am 20 years old.')
 
     def test_no_val_in_context(self):
         text = "Hi, my name is {{ name }}. and I am from {{ country }}. I am {{ age }} years old."
         context = {'name': 'John', 'age': '20'}
-        parsed = self.factory.parse(text, context)
+        parsed = self.parser.parse(text, context)
         self.assertEqual(parsed, 'Hi, my name is John. and I am from {{ country }}. I am 20 years old.')
 
     def test_iter(self):
-        text = "{{ for item in items }}item: {{ item }}\n{{ end for }}"
+        text = "{{ for item in items }}item: {{ item }}\n{{ end for }} hihi"
         context = {'items': ['a', 'b', 'c']}
-        parsed = self.factory.parse(text, context)
-        self.assertEqual(parsed, 'item: a\nitem: b\nitem: c\n')
+        parsed = self.parser.parse(text, context)
+        self.assertEqual(parsed, 'item: a\nitem: b\nitem: c\n hihi')
 
     def test_iter_nested(self):
         text = "{{ for list in lists }}{{ for item in list }}item: {{ item }}\n{{ end for }}\n{{ end for }}"
         context = {'lists': [['a', 'b'], ['c', 'd']]}
-        parsed = self.factory.parse(text, context)
+        parsed = self.parser.parse(text, context)
         self.assertEqual(parsed, 'item: a\nitem: b\n\nitem: c\nitem: d\n\n')
 
     def test_empty_iter(self):
         text = "{{ for item in items }}item: {{ item }}\n{{ end for }}"
         context = {'items': []}
-        parsed = self.factory.parse(text, context)
+        parsed = self.parser.parse(text, context)
         self.assertEqual(parsed, '')
 
 

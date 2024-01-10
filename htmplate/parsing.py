@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, Callable, NewType
+from typing import Any, Callable, NewType, Self
 from types import MethodType
 from dataclasses import dataclass, replace
 from abc import ABC, abstractmethod
@@ -133,14 +133,14 @@ class ControlFieldSignature(FieldSignature):
             return self
         return MethodType(self, instance)
 
-    def __call__(self, instruction: str, control: ControlField.ControlFlowInfo):
-        return self.func(instruction, control)
+    def __call__(self, field: ControlField, control: ControlField.ControlFlowInfo):
+        return self.func(field, control)
 
     def match(self, text: str) -> bool:
         regex = re.compile(self.signature)
-        return regex.match(text) is not None
+        return regex.fullmatch(text) is not None
 
-    def get_owner(self) -> type[Field]:
+    def get_owner(self) -> type[ControlField]:
         return self.owner
 
 
@@ -152,13 +152,13 @@ class SingleFieldSignature(FieldSignature):
 
     def match(self, text: str) -> bool:
         regex = re.compile(self.signature)
-        return regex.match(text) is not None
+        return regex.fullmatch(text) is not None
 
     def get_owner(self) -> type[Field]:
         return self.owner
 
 
-class Field(ABC, TreeNode):
+class Field(TreeNode):
 
     @classmethod
     @abstractmethod
@@ -166,22 +166,33 @@ class Field(ABC, TreeNode):
         pass
 
 
-class ControlField(ABC, Field):
+class ControlField(Field):
 
     @dataclass
     class ControlFlowInfo:
+        class Storage:
+            pass
+
         context: Any
+        mut_context: Any
         extra_context: Any
         index: int
+        internal: Any
         exit_next: bool = False
 
-    FieldMethod = NewType('FieldMethod', Callable[[str, ControlFlowInfo], tuple[ControlFlowInfo, str | None]])
+    FieldMethod = NewType('FieldMethod', Callable[[Self, ControlFlowInfo], tuple[ControlFlowInfo, str | None]])
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        cls._initial_fields = []
+        cls._middle_fields = []
+        cls._final_fields = []
 
     @classmethod
     def initial(cls, regex: str) -> Callable[[FieldMethod], ControlFieldSignature]:
 
         def decorator(method: ControlField.FieldMethod) -> ControlFieldSignature:
-            tmp = ControlFieldSignature(cls, ControlFieldSignature.FieldType.INITIAL, regex, method)
+            tmp = ControlFieldSignature(ControlFieldSignature.FieldType.INITIAL, cls, regex, method)
             cls._initial_fields.append(tmp)
             return tmp
         return decorator
@@ -189,7 +200,7 @@ class ControlField(ABC, Field):
     @classmethod
     def middle(cls, regex: str) -> Callable[[FieldMethod], ControlFieldSignature]:
         def decorator(method: ControlField.FieldMethod) -> ControlFieldSignature:
-            tmp = ControlFieldSignature(cls, ControlFieldSignature.FieldType.MIDDLE, regex, method)
+            tmp = ControlFieldSignature(ControlFieldSignature.FieldType.MIDDLE, cls, regex, method)
             cls._middle_fields.append(tmp)
             return tmp
         return decorator
@@ -197,7 +208,7 @@ class ControlField(ABC, Field):
     @classmethod
     def final(cls, regex: str) -> Callable[[FieldMethod], ControlFieldSignature]:
         def decorator(method: ControlField.FieldMethod) -> ControlFieldSignature:
-            tmp = ControlFieldSignature(cls, ControlFieldSignature.FieldType.FINAL, regex, method)
+            tmp = ControlFieldSignature(ControlFieldSignature.FieldType.FINAL, cls, regex, method)
             cls._final_fields.append(tmp)
             return tmp
         return decorator
@@ -216,21 +227,25 @@ class ControlField(ABC, Field):
 
     @classmethod
     def middle_fields(cls) -> list[ControlFieldSignature]:
-        return cls._initial_fields.copy()
+        return cls._middle_fields.copy()
 
     @classmethod
     def final_fields(cls) -> list[ControlFieldSignature]:
-        return cls._initial_fields.copy()
+        return cls._final_fields.copy()
 
     @classmethod
     def all_fields(cls) -> list[ControlFieldSignature]:
         return cls.initial_fields() + cls.middle_fields() + cls.final_fields()
 
-    def get_matching_signature(self, instruction: str) -> ControlFieldSignature | None:
-        for field in self.all_fields():
+    @classmethod
+    def get_matching_signature(cls, instruction: str) -> ControlFieldSignature | None:
+        for field in cls.all_fields():
             if field.match(instruction):
                 return field
-        raise None
+        return None
+
+    def get_elements(self, control: ControlFlowInfo) -> tuple[ControlFieldSignature, ActiveToken, ContentNode]:
+        return self.content[control.index]
 
     @abstractmethod
     def start_context(self):
@@ -267,20 +282,20 @@ class ControlField(ABC, Field):
 
     def render(self, context: Any) -> str:
         out: list[str] = []
-        control = self.ControlFlowInfo(context, self.extra_context, 0)
+        control = self.ControlFlowInfo(context, None, self.extra_context, 0, self.ControlFlowInfo.Storage())
         while not control.exit_next:
             signature, token, node = self.content[control.index]
-            control, inner_render = signature(token.instruction, replace(control))
+            control, inner_render = signature(self, replace(control))
             if inner_render is not None:
                 out.append(inner_render)
         return ''.join(out)
 
 
-class SingleField(ABC, Field):
+class SingleField(Field):
 
     def __init__(self, parser: Parser, tokens: list[TokenBase], fields_t: list[type[Field]], extra_context: Any = None):
         super().__init__(parser, tokens, fields_t, extra_context)
-        self.content: ActiveToken = None
+        self.content: ActiveToken | None = None
 
     @classmethod
     @abstractmethod
@@ -319,11 +334,11 @@ class ContentNode(TreeNode):
         super().__init__(parser, tokens, fields_t, extra_context)
         self.children: list[Field | LeafNode | ContentNode] = None
 
-    def _get_field(self, instruction: str) -> ControlFieldSignature:
+    def _get_field(self, instruction: str) -> tuple[type[Field], ControlFieldSignature]:
         for field_t in self.fields_t:
             tmp = field_t.get_matching_signature(instruction)
             if tmp is not None:
-                return tmp
+                return field_t, tmp
         raise Parser.ParsingError(f'No field found for {instruction}')
 
     def make_tree(self, start: int) -> int:
@@ -334,12 +349,12 @@ class ContentNode(TreeNode):
             token = self.tokens[current]
 
             if isinstance(token, ActiveToken):
-                sig: FieldSignature = self._get_field(token.instruction)
+                field_t, sig = self._get_field(token.instruction)
                 if isinstance(sig, ControlFieldSignature):
                     if sig.f_type in [ControlFieldSignature.FieldType.MIDDLE, ControlFieldSignature.FieldType.FINAL]:
                         self.children = out
                         return current
-                field = sig.get_owner()(self.parser, self.tokens, self.fields_t, self.extra_context)
+                field = field_t(self.parser, self.tokens, self.fields_t, self.extra_context)
                 current = field.make_tree(current)
                 out.append(field)
 
