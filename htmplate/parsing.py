@@ -201,16 +201,15 @@ class ControlField(Field):
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
-        cls._initial_fields = []
-        cls._middle_fields = []
-        cls._final_fields = []
+        cls.initial_fields = []
+        cls.middle_fields = []
+        cls.final_fields = []
 
     @classmethod
     def initial(cls, regex: str) -> Callable[[FieldMethod], ControlFieldSignature]:
-
         def decorator(method: ControlField.FieldMethod) -> ControlFieldSignature:
             tmp = ControlFieldSignature(ControlFieldSignature.FieldType.INITIAL, cls, regex, method)
-            cls._initial_fields.append(tmp)
+            cls.initial_fields.append(tmp)
             return tmp
         return decorator
 
@@ -218,7 +217,7 @@ class ControlField(Field):
     def middle(cls, regex: str) -> Callable[[FieldMethod], ControlFieldSignature]:
         def decorator(method: ControlField.FieldMethod) -> ControlFieldSignature:
             tmp = ControlFieldSignature(ControlFieldSignature.FieldType.MIDDLE, cls, regex, method)
-            cls._middle_fields.append(tmp)
+            cls.middle_fields.append(tmp)
             return tmp
         return decorator
 
@@ -226,13 +225,13 @@ class ControlField(Field):
     def final(cls, regex: str) -> Callable[[FieldMethod], ControlFieldSignature]:
         def decorator(method: ControlField.FieldMethod) -> ControlFieldSignature:
             tmp = ControlFieldSignature(ControlFieldSignature.FieldType.FINAL, cls, regex, method)
-            cls._final_fields.append(tmp)
+            cls.final_fields.append(tmp)
             return tmp
         return decorator
 
-    _initial_fields: list[ControlFieldSignature] = []
-    _middle_fields: list[ControlFieldSignature] = []
-    _final_fields: list[ControlFieldSignature] = []
+    initial_fields: list[ControlFieldSignature] = []
+    middle_fields: list[ControlFieldSignature] = []
+    final_fields: list[ControlFieldSignature] = []
 
     def __init__(self, parser: Parser, tokens: list[TokenBase], fields_t: list[type[Field]], extra_context: Any = None):
         super().__init__(parser, tokens, fields_t, extra_context)
@@ -250,20 +249,8 @@ class ControlField(Field):
         return {"type": self.__class__.__name__, "content": out}
 
     @classmethod
-    def initial_fields(cls) -> list[ControlFieldSignature]:
-        return cls._initial_fields.copy()
-
-    @classmethod
-    def middle_fields(cls) -> list[ControlFieldSignature]:
-        return cls._middle_fields.copy()
-
-    @classmethod
-    def final_fields(cls) -> list[ControlFieldSignature]:
-        return cls._final_fields.copy()
-
-    @classmethod
     def all_fields(cls) -> list[ControlFieldSignature]:
-        return cls.initial_fields() + cls.middle_fields() + cls.final_fields()
+        return cls.initial_fields + cls.middle_fields + cls.final_fields
 
     @classmethod
     def get_matching_signature(cls, instruction: str) -> ControlFieldSignature | None:
@@ -345,7 +332,7 @@ class SingleField(Field):
 
     @abstractmethod
     def execute_field(self, context: Any) -> str:
-        ...
+        pass
 
     def make_tree(self, start: int) -> int:
         token = self.tokens[start]

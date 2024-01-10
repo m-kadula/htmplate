@@ -55,7 +55,8 @@ class DataField(SingleField):
         match = reg.match(self.content.instruction)
         name = match.group(1)
         if name in context:
-            return context[name]
+            inner = context[name]
+            return self.parser.parse(inner, context)
         else:
             return self.content.field_content
 
@@ -81,11 +82,13 @@ def initial(field: ControlField, control: ControlField.ControlFlowInfo) -> tuple
         control.internal.iterated = match.group(2)
 
         if control.internal.iterated not in control.context:
-            raise Parser.ParsingError(f'No iterable named {control.internal.iterared} in context')
+            content = content_node.render(context={})
+            control.exit_next = True
+            return control, field.content[0][1].field_content + content + field.content[1][1].field_content
 
     if len(control.context[control.internal.iterated]) == 0:
         control.exit_next = True
-        return control, ''
+        return control, None
     current = control.context[control.internal.iterated][control.internal.index]
     mut_context = {control.internal.iterable: current}
     content = content_node.render(mut_context | control.context)
@@ -99,10 +102,10 @@ def final(field: ControlField, control: ControlField.ControlFlowInfo) -> tuple[C
     control.internal.index += 1
     if control.internal.index < len(control.context[control.internal.iterated]):
         control.index = 0
-        return control, ''
+        return control, None
     else:
         control.exit_next = True
-        return control, ''
+        return control, None
 
 
 class TreeTest(unittest.TestCase):
