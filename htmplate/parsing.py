@@ -67,29 +67,6 @@ class SimpleLexer(LexerBase):
 
 # PARSER ========================================================
 
-
-class Parser:
-
-    class ParsingError(Exception):
-        pass
-
-    def __init__(self, lexer: LexerBase, field_types: list[type[ControlField]]):
-        self.lexer = lexer
-        self.field_types = field_types
-
-    def make_tree(self, template: str, extra_context: Any = None) -> ContentNode:
-        tokens = self.lexer.tokenize(template)
-        root = ContentNode(self, tokens, self.field_types, extra_context)
-        out = root.make_tree(0)
-        if out != len(tokens):
-            raise Parser.ParsingError('Unexpected end of template')
-        return root
-
-    def parse(self, template: str, context: Any, **extra_context) -> str:
-        tree = self.make_tree(template, extra_context)
-        return tree.render(context, {})
-
-
 class TreeNode(ABC):
 
     def __init__(self, parser: Parser, tokens: list[TokenBase], fields_t: list[type[Field]], extra_context: Any = None):
@@ -297,7 +274,7 @@ class ControlField(Field):
                 raise Parser.ParsingError(f'Unexpected field {current_token.instruction}')
 
             if match.f_type in [ControlFieldSignature.FieldType.INITIAL, ControlFieldSignature.FieldType.MIDDLE]:
-                content = ContentNode(self.parser, self.tokens, self.fields_t, self.extra_context)
+                content = self.parser.content_node_t(self.parser, self.tokens, self.fields_t, self.extra_context)
                 index = content.make_tree(index + 1)
                 out.append((match, current_token, content))
             else:
@@ -397,7 +374,7 @@ class ContentNode(TreeNode):
                 out.append(field)
 
             elif isinstance(token, InactiveToken):
-                child = LeafNode(self.parser, self.tokens, self.fields_t, self.extra_context)
+                child = self.parser.leaf_node_t(self.parser, self.tokens, self.fields_t, self.extra_context)
                 current = child.make_tree(current)
                 out.append(child)
 
@@ -440,3 +417,31 @@ class LeafNode(TreeNode):
 
     def render(self, context: Any, inner_extra: dict) -> str:
         return self.content.field_content
+
+
+class Parser:
+
+    class ParsingError(Exception):
+        pass
+
+    def __init__(self,
+                 lexer: LexerBase,
+                 field_types: list[type[ControlField]],
+                 content_node_t: type[ContentNode] = ContentNode,
+                 leaf_node_t: type[LeafNode] = LeafNode):
+        self.content_node_t = content_node_t
+        self.leaf_node_t = leaf_node_t
+        self.lexer = lexer
+        self.field_types = field_types
+
+    def make_tree(self, template: str, extra_context: Any = None) -> ContentNode:
+        tokens = self.lexer.tokenize(template)
+        root = self.content_node_t(self, tokens, self.field_types, extra_context)
+        out = root.make_tree(0)
+        if out != len(tokens):
+            raise Parser.ParsingError('Unexpected end of template')
+        return root
+
+    def parse(self, template: str, context: Any, **extra_context) -> str:
+        tree = self.make_tree(template, extra_context)
+        return tree.render(context, {})
