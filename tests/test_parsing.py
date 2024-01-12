@@ -228,6 +228,58 @@ class TreeTest(unittest.TestCase):
         text = text.split()
         self.assertRaises(Parser.ParsingError, lambda: all(machine.next(x) for x in text))
 
+    def test_state_machine_same_names(self):
+        class Test(ControlField):
+            initial_fields = ControlField.initial(
+                ('a', r'\s*a\s*'),
+                ('a', r'\s*a2\s*'),
+                ('a', r'\s*a3\s*')
+            )
+            middle_fields = ControlField.middle(
+                ('b', r'\s*b\s*'),
+                ('c', r'\s*c\s*'),
+                ('c', r'\s*c2\s*'),
+                ('x', r'\s*x\s*'),
+            )
+            final_fields = ControlField.final(
+                ('d', r'\s*d\s*'),
+                ('d', r'\s*d2\s*')
+            )
+            body = ControlField.make_body(
+                ('a',),
+                ('b', (0, 1)),
+                ('c', (0, 10)),
+                ('x', 1),
+                ('c', (0, 1)),
+                ('d',)
+            )
+
+            def render(self, context: Any, inner_extra: dict) -> str:
+                out = []
+                for signature, token, node in self.content:
+                    out.append(signature.name)
+                return ' '.join(out)
+
+        parser = Parser(SimpleLexer(), [Test])
+
+        mini_tests = [
+            ("a b c c2 c x c d", True),
+            ("a2 x d", True),
+            ("a3 d", False),
+            ("a x c d", True),
+            ("b3 c c2 c x c d2", False),
+            ("a2 b b c x c d", False),
+            ("a b c c2 c c2 c c c x c d2", True),
+        ]
+
+        for text, no_error in mini_tests:
+            expected = ' '.join(x[0] for x in text.split())
+            text2 = ''.join('{{' + a + '}}' for a in text.split())
+            if no_error:
+                self.assertEqual(expected, parser.parse(text2, {}))
+            else:
+                self.assertRaises(Parser.ParsingError, lambda: parser.make_tree(text2))
+
     def test_if_exception(self):
         text = "{{ if condition }}{{ name }}{{ if:else }}{{ name2 }}{{ elif c2 }}{{ name3 }}{{ end if }}"
         context = {'condition': True, "c2": True, 'name': 'John', 'name2': 'Mike', 'name3': 'Jack'}
