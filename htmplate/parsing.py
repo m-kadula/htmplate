@@ -87,7 +87,7 @@ class Parser:
 
     def parse(self, template: str, context: Any, **extra_context) -> str:
         tree = self.make_tree(template, extra_context)
-        return tree.render(context)
+        return tree.render(context, {})
 
 
 class TreeNode(ABC):
@@ -103,7 +103,7 @@ class TreeNode(ABC):
         pass
 
     @abstractmethod
-    def render(self, context: Any) -> str:
+    def render(self, context: Any, inner_extra: dict) -> str:
         pass
 
     @abstractmethod
@@ -316,7 +316,7 @@ class ControlField(Field):
         return ''.join(out)
 
     @abstractmethod
-    def render(self, context: Any) -> str:
+    def render(self, context: Any, inner_extra: dict) -> str:
         pass
 
 
@@ -356,7 +356,7 @@ class SingleField(Field):
         return self.content.field_content
 
     @abstractmethod
-    def render(self, context: Any) -> str:
+    def render(self, context: Any, inner_extra: dict) -> str:
         pass
 
 
@@ -413,10 +413,10 @@ class ContentNode(TreeNode):
             out.append(child.get_original())
         return ''.join(out)
 
-    def render(self, context: Any) -> str:
+    def render(self, context: Any, inner_extra: dict) -> str:
         out: list[str] = []
         for child in self.children:
-            out.append(child.render(context))
+            out.append(child.render(context, inner_extra))
         return ''.join(out)
 
 
@@ -438,5 +438,5 @@ class LeafNode(TreeNode):
     def get_original(self) -> str:
         return self.content.field_content
 
-    def render(self, context: Any) -> str:
+    def render(self, context: Any, inner_extra: dict) -> str:
         return self.content.field_content

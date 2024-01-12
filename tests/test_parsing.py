@@ -52,7 +52,7 @@ class DataField(SingleField):
     def get_regex(cls) -> str:
         return r'\s*([0-9a-zA-Z_]+)\s*'
 
-    def render(self, context: Any) -> str:
+    def render(self, context: Any, inner_extra: dict) -> str:
         assert isinstance(self.content, ActiveToken)
         reg = re.compile(self.get_regex())
         match = reg.match(self.content.instruction)
@@ -81,7 +81,7 @@ class IterField(ControlField):
         ('end for',)
     )
 
-    def render(self, context: Any) -> str:
+    def render(self, context: Any, inner_extra: dict) -> str:
         out: list[str] = []
         signature, token, node = self.content[0]
         reg = re.compile(signature.signature)
@@ -95,7 +95,7 @@ class IterField(ControlField):
         iterable = context[iterable_name]
         for value in iterable:
             mut_context = {value_name: value}
-            content = node.render(mut_context | context)
+            content = node.render(mut_context | context, inner_extra)
             out.append(content)
 
         return ''.join(out)
@@ -123,7 +123,7 @@ class ConditionalField(ControlField):
         ('end if',)
     )
 
-    def render(self, context: Any) -> str:
+    def render(self, context: Any, inner_extra: dict) -> str:
         for signature, token, node in self.content:
             if signature.name in ('if', 'elif'):
                 reg = re.compile(signature.signature)
@@ -132,11 +132,11 @@ class ConditionalField(ControlField):
                 if value_name in context:
                     value = context[value_name]
                     if value:
-                        return node.render(context)
+                        return node.render(context, inner_extra)
                 else:
                     return self.get_original()
             elif signature.name == 'else':
-                return node.render(context)
+                return node.render(context, inner_extra)
         return ''
 
 
@@ -157,14 +157,14 @@ class ContextField(ControlField):
         ('end context',)
     )
 
-    def render(self, context: Any) -> str:
+    def render(self, context: Any, inner_extra: dict) -> str:
         signature, token, node = self.content[0]
         reg = re.compile(signature.signature)
         match = reg.match(token.instruction)
         value_name = match.group(1)
         if value_name in context:
             value = context[value_name]
-            return node.render(value)
+            return node.render(value, inner_extra)
         else:
             return self.get_original()
 
@@ -195,7 +195,7 @@ class TreeTest(unittest.TestCase):
                 ('d',)
             )
 
-            def render(self, context: Any) -> str:
+            def render(self, context: Any, inner_extra: dict) -> str:
                 return ''
 
         mini_tests = [
