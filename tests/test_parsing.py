@@ -52,7 +52,7 @@ class DataField(SingleField):
     def get_regex(cls) -> str:
         return r'\s*([0-9a-zA-Z_]+)\s*'
 
-    def execute_field(self, context: Any) -> str:
+    def render(self, context: Any) -> str:
         assert isinstance(self.content, ActiveToken)
         reg = re.compile(self.get_regex())
         match = reg.match(self.content.instruction)
@@ -66,156 +66,172 @@ class DataField(SingleField):
 
 class IterField(ControlField):
 
-    def start_context(self) -> ControlField.Storage:
-        return ControlField.Storage()
+    initial_fields = ControlField.initial(
+        ('for', r'\s*for\s+([0-9a-zA-Z_]+)\s+in\s+([0-9a-zA-Z_]+)\s*')
+    )
 
-    def check_context(self, storage: ControlField.Storage, signature: ControlFieldSignature):
-        pass
+    middle_fields = ControlField.middle()
 
-    def start_internal_storage(self):
-        storage = ControlField.Storage()
-        storage.index = 0
-        storage.iterable = None
-        storage.iterated = None
-        return storage
+    final_fields = ControlField.final(
+        ('end for', r'\s*end\s+for\s*')
+    )
 
+    body = ControlField.make_body(
+        ('for',),
+        ('end for',)
+    )
 
-@IterField.initial('for', r'\s*for\s+([0-9a-zA-Z_]+)\s+in\s+([0-9a-zA-Z_]+)\s*')
-def initial(field: ControlField, control: ControlField.ControlFlowInfo) -> tuple[ControlField.ControlFlowInfo, str]:
-    sig, token, content_node = field.get_elements(control)
-    reg = re.compile(sig.signature)
-    match = reg.match(token.instruction)
-    if control.internal.iterable is None:
-        control.internal.iterable = match.group(1)
-        control.internal.iterated = match.group(2)
+    def render(self, context: Any) -> str:
+        out: list[str] = []
+        signature, token, node = self.content[0]
+        reg = re.compile(signature.signature)
+        match = reg.match(token.instruction)
+        value_name = match.group(1)
+        iterable_name = match.group(2)
 
-        if control.internal.iterated not in control.context:
-            content = content_node.render(context={})
-            control.exit_next = True
-            return control, field.content[0][1].field_content + content + field.content[1][1].field_content
+        if iterable_name not in context:
+            return self.get_original()
 
-    if len(control.context[control.internal.iterated]) == 0:
-        control.exit_next = True
-        return control, None
-    current = control.context[control.internal.iterated][control.internal.index]
-    mut_context = {control.internal.iterable: current}
-    content = content_node.render(mut_context | control.context)
-    control.index = 1
-    return control, content
+        iterable = context[iterable_name]
+        for value in iterable:
+            mut_context = {value_name: value}
+            content = node.render(mut_context | context)
+            out.append(content)
 
-
-@IterField.final('end for', r'\s*end\s+for\s*')
-def final(field: ControlField, control: ControlField.ControlFlowInfo) -> tuple[ControlField.ControlFlowInfo, str]:
-    control.internal.index += 1
-    if control.internal.index < len(control.context[control.internal.iterated]):
-        control.index = 0
-        return control, None
-    else:
-        control.exit_next = True
-        return control, None
+        return ''.join(out)
 
 
 class ConditionalField(ControlField):
 
-    def start_context(self) -> ControlField.Storage:
-        storage = ControlField.Storage()
-        storage.last_command = None
-        return storage
+    initial_fields = ControlField.initial(
+        ('if', r'\s*if\s+([0-9a-zA-Z_]+)\s*'),
+    )
 
-    def check_context(self, storage: ControlField.Storage, signature: ControlFieldSignature) -> ControlField.Storage:
-        current_command = signature.name
-        if storage.last_command == current_command and not storage.last_command == 'elif':
-            raise ValueError(f"Cannot have two consecutive {current_command} commands")
-        if storage.last_command == 'else' and current_command != 'end if':
-            raise ValueError(f"Cannot have {current_command} after else command")
-        storage.last_command = current_command
-        return storage
+    middle_fields = ControlField.middle(
+        ('elif', r'\s*elif\s+([0-9a-zA-Z_]+)\s*'),
+        ('else', r'\s*if:else\s*'),
+    )
 
-    def start_internal_storage(self):
-        pass
+    final_fields = ControlField.final(
+        ('end if', r'\s*end\s+if\s*'),
+    )
 
+    body = ControlField.make_body(
+        ('if',),
+        ('elif', (0, float('inf'))),
+        ('else', (0, 1)),
+        ('end if',)
+    )
 
-@ConditionalField.initial('if', r'\s*if\s+([0-9a-zA-Z_]+)\s*')
-def if_stmt(field: ControlField, control: ControlField.ControlFlowInfo) -> tuple[ControlField.ControlFlowInfo, str]:
-    sig, token, content_node = field.get_elements(control)
-    reg = re.compile(sig.signature)
-    match = reg.match(token.instruction)
-    value = match.group(1)
-    if value in control.context:
-        value = control.context[value]
-        if value:
-            control.exit_next = True
-            return control, content_node.render(context=control.context) if value else None
-        else:
-            control.index += 1
-            return control, None
-    else:
-        control.exit_next = True
-        out = []
-        for signature, token, node in field.content:
-            tmp = node.render({}) if node is not None else ''
-            out.append(token.field_content + tmp)
-        return control, ''.join(out)
-
-
-@ConditionalField.middle('elif', r'\s*elif\s+([0-9a-zA-Z_]+)\s*')
-def elif_stmt(field: ControlField, control: ControlField.ControlFlowInfo) -> tuple[ControlField.ControlFlowInfo, str]:
-    return if_stmt(field, control)
-
-
-@ConditionalField.middle('else', r'\s*if:else\s*')
-def else_stmt(field: ControlField, control: ControlField.ControlFlowInfo) -> tuple[ControlField.ControlFlowInfo, str]:
-    sig, token, content_node = field.get_elements(control)
-    control.exit_next = True
-    return control, content_node.render(context=control.context)
-
-
-@ConditionalField.final('end if', r'\s*end\s+if\s*')
-def end_if_stmt(field: ControlField, control: ControlField.ControlFlowInfo) -> tuple[ControlField.ControlFlowInfo, str]:
-    control.exit_next = True
-    return control, None
+    def render(self, context: Any) -> str:
+        for signature, token, node in self.content:
+            if signature.name in ('if', 'elif'):
+                reg = re.compile(signature.signature)
+                match = reg.match(token.instruction)
+                value_name = match.group(1)
+                if value_name in context:
+                    value = context[value_name]
+                    if value:
+                        return node.render(context)
+                else:
+                    return self.get_original()
+            elif signature.name == 'else':
+                return node.render(context)
+        return ''
 
 
 class ContextField(ControlField):
 
-    def start_context(self) -> ControlField.Storage:
-        return ControlField.Storage()
+    initial_fields = ControlField.initial(
+        ('context', r'\s*context\s+([0-9a-zA-Z_]+)\s*'),
+    )
 
-    def check_context(self, storage: ControlField.Storage, signature: ControlFieldSignature):
-        pass
+    middle_fields = ControlField.middle()
 
-    def start_internal_storage(self):
-        pass
+    final_fields = ControlField.final(
+        ('end context', r'\s*end\s+context\s*'),
+    )
 
+    body = ControlField.make_body(
+        ('context',),
+        ('end context',)
+    )
 
-@ContextField.initial('context', r'\s*context\s+([0-9a-zA-Z_]+)\s*')
-def context_stmt(field: ControlField, control: ControlField.ControlFlowInfo) \
-        -> tuple[ControlField.ControlFlowInfo, str]:
-    sig, token, content_node = field.get_elements(control)
-    reg = re.compile(sig.signature)
-    match = reg.match(token.instruction)
-    value = match.group(1)
-    if value in control.context:
-        value = control.context[value]
-        control.exit_next = True
-        return control, content_node.render(context=value)
-    else:
-        control.exit_next = True
-        return (control, field.content[0][1].field_content +
-                content_node.render({}) + field.content[1][1].field_content)
-
-
-@ContextField.final('end context', r'\s*end\s+context\s*')
-def end_context_stmt(field: ControlField, control: ControlField.ControlFlowInfo) \
-        -> tuple[ControlField.ControlFlowInfo, str]:
-    control.exit_next = True
-    return control, None
+    def render(self, context: Any) -> str:
+        signature, token, node = self.content[0]
+        reg = re.compile(signature.signature)
+        match = reg.match(token.instruction)
+        value_name = match.group(1)
+        if value_name in context:
+            value = context[value_name]
+            return node.render(value)
+        else:
+            return self.get_original()
 
 
 class TreeTest(unittest.TestCase):
 
     def setUp(self):
         self.parser = Parser(SimpleLexer(), [DataField, IterField, ConditionalField, ContextField])
+
+    def test_state_machine(self):
+        class Test(ControlField):
+            initial_fields = ControlField.initial(
+                ('a', r'\s*a\s*')
+            )
+            middle_fields = ControlField.middle(
+                ('b', r'\s*b\s*'),
+                ('c', r'\s*c\s*'),
+            )
+            final_fields = ControlField.final(
+                ('d', r'\s*d\s*')
+            )
+            body = ControlField.make_body(
+                ('a',),
+                ('b', (0, 1)),
+                ('c', (0, 10)),
+                ('a', 1),
+                ('c', (0, 1)),
+                ('d',)
+            )
+
+            def render(self, context: Any) -> str:
+                return ''
+
+        mini_tests = [
+            ("a b c c c a c d", True),
+            ("a a d", True),
+            ("a d", False),
+            ("a b c d", False),
+            ("b c c c a c d", False),
+            ("a b b c a c d", False),
+            ("a b c c c c c c c a c d", True),
+        ]
+
+        machine = ControlField.BodyStateMachine(Test.body)
+        for text, expected in mini_tests:
+            machine.start()
+            text = text.split()
+            self.assertEqual(expected, all(machine.next(x) for x in text))
+
+        class Test2(Test):
+            body = ControlField.make_body(
+                ('a',),
+                ('b', (0, 1)),
+                ('b', (0, 10)),
+                ('d',)
+            )
+
+        text = 'a b d'
+        machine = ControlField.BodyStateMachine(Test2.body)
+        machine.start()
+        text = text.split()
+        self.assertRaises(Parser.ParsingError, lambda: all(machine.next(x) for x in text))
+
+    def test_if_exception(self):
+        text = "{{ if condition }}{{ name }}{{ if:else }}{{ name2 }}{{ elif c2 }}{{ name3 }}{{ end if }}"
+        context = {'condition': True, "c2": True, 'name': 'John', 'name2': 'Mike', 'name3': 'Jack'}
+        self.assertRaises(Parser.ParsingError, lambda: self.parser.parse(text, context))
 
     def test_basic(self):
         text = "test {{ test }}"
