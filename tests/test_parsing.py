@@ -48,13 +48,11 @@ class SimpleLexerTest(unittest.TestCase):
 
 class DataField(SingleField):
 
-    @classmethod
-    def get_regex(cls) -> str:
-        return r'\s*([0-9a-zA-Z_]+)\s*'
+    field = SingleField.make_field(r'\s*([0-9a-zA-Z_]+)\s*')
 
     def render(self, context: Any, inner_extra: dict) -> str:
         assert isinstance(self.content, ActiveToken)
-        reg = re.compile(self.get_regex())
+        reg = re.compile(self.field.signature)
         match = reg.match(self.content.instruction)
         name = match.group(1)
         if name in context:

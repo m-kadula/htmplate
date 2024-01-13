@@ -428,11 +428,23 @@ class SingleField(Field):
     """
     Base class for all single fields
 
-    To implement a single field, you need to implement the following methods:
+    To implement a single field, you need to implement the following attribute:
+    field = SingleField.make_field(...): a SingleFieldSignature that matches the field
+    This attribute is a class attribute and should be initialised using the static method make_field.
 
-            - get_regex: returns the regex that matches the field
-            - render: renders the field
+    The render method should be implemented to render the field.
     """
+
+    field: SingleFieldSignature = None
+
+    @staticmethod
+    def make_field(regex: str) -> SingleFieldSignature:
+        """
+        Creates a field signature. This should be used to initialise the field attribute.
+
+        :param regex: regex that matches the field
+        """
+        return SingleFieldSignature(regex)
 
     def __init__(self, parser: Parser, tokens: list[TokenBase], fields_t: list[type[Field]], extra_context: Any = None):
         super().__init__(parser, tokens, fields_t, extra_context)
@@ -442,13 +454,8 @@ class SingleField(Field):
         return {"type": self.__class__.__name__, "content": repr(self.content)}
 
     @classmethod
-    @abstractmethod
-    def get_regex(cls) -> str:
-        ...
-
-    @classmethod
     def get_field(cls) -> ControlFieldSignature:
-        return SingleFieldSignature(cls.get_regex())
+        return cls.field
 
     @classmethod
     def get_matching_signature(cls, instruction: str) -> FieldSignature | None:
