@@ -433,6 +433,30 @@ class ParsingTest(unittest.TestCase):
         parsed = self.parser.parse(text, context)
         self.assertEqual(parsed, text)
 
+    def test_whole(self):
+        text = """
+Hi my name is {{ name }}. I am {{ age }} years old.
+a random list:{{ context iteration }}{{ for list in lists }}{{ for item in list }}
+{{ if item }}    - {{ item }}{{ if:else }}    - empty :({{ end if }}{{ end for }}
+{{ end for }}
+{{ end context }}
+        """
+        context = {'name': 'John', 'age': '20', 'iteration': {'lists': [['one', 'two', 'three'], ['raz', 'dwa', '']]}}
+        parsed = self.parser.parse(text, context)
+        print(parsed)
+        expected = """
+Hi my name is John. I am 20 years old.
+a random list:
+    - one
+    - two
+    - three
+
+    - raz
+    - dwa
+    - empty :(
+"""
+        self.assertEqual(expected.strip(), parsed.strip())
+
 
 if __name__ == '__main__':
     unittest.main()
