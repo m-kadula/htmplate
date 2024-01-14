@@ -188,6 +188,11 @@ class ControlFieldSignature(FieldSignature):
         self.f_type = f_type
         self.occurrences = occurrences
 
+    def __eq__(self, other):
+        if not isinstance(other, ControlFieldSignature):
+            return False
+        return self.name == other.name and self.f_type == other.f_type and self.signature == other.signature
+
     def __repr__(self):
         return f'<{self.__class__.__name__} type={self.f_type} signature={self.signature!r}>'
 
