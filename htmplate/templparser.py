@@ -176,7 +176,7 @@ class ConditionalField(ControlField):
         node = None
 
         for signature, token, node in self.content:
-            if signature.name == 'else':
+            if signature.name in ['else', 'end if']:
                 break
 
             check_sig = self.initial_fields[1] if signature.name == 'if' else self.middle_fields[1]

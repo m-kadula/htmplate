@@ -4,7 +4,7 @@ from pathlib import Path
 from bs4 import BeautifulSoup
 
 from htmplate.parsing import Parser, SimpleLexer
-from htmplate.templparser import DataField, IterField, ConditionalField, ContextField, FileInclude
+from htmplate.templparser import DataField, IterField, DictIterField, ConditionalField, ContextField, FileInclude
 
 
 RESOURCE_DIR = Path(__file__).parent / 'resources'
@@ -15,7 +15,7 @@ class ParsingTest(unittest.TestCase):
     def setUp(self):
         self.parser = Parser(
             SimpleLexer(),
-            [DataField, IterField, ConditionalField, ContextField, FileInclude])
+            [DataField, IterField, DictIterField, ConditionalField, ContextField, FileInclude])
 
     def test_basic(self):
         text = "Hi, my name is {{ name }}. and I am from {{ country }}. I am {{ age }} years old."
@@ -55,6 +55,12 @@ class ParsingTest(unittest.TestCase):
         context = {'items': []}
         parsed = self.parser.parse(text, context)
         self.assertEqual(parsed, '')
+
+    def test_dict_iter(self):
+        text = "{{ for key, value in dct }}{{ key }}: {{ value }}\n{{ end for }}"
+        context = {'dct': {'a': '1', 'b': '2', 'c': '3'}}
+        parsed = self.parser.parse(text, context)
+        self.assertEqual(parsed, 'a: 1\nb: 2\nc: 3\n')
 
     def test_if(self):
         text = "{{ if condition }}{{ name }}{{ end if }}"
@@ -102,6 +108,14 @@ class ParsingTest(unittest.TestCase):
         context = {'name2': 'Mike'}
         parsed = self.parser.parse(text, context)
         self.assertEqual(parsed, 'Mike')
+
+        text = "{{ if condition }}{{ name }}{{ elif:exists name2 }}{{ name2 }}{{ end if }}"
+        context = {'condition': False, 'name': 'John', 'name2': 'Mike'}
+        parsed = self.parser.parse(text, context)
+        self.assertEqual(parsed, 'Mike')
+        context = {'condition': False, 'name': 'John'}
+        parsed = self.parser.parse(text, context)
+        self.assertEqual(parsed, '')
 
     def test_context(self):
         text = "{{ context context_name }}{{ name }}{{ end context }}"
@@ -170,7 +184,6 @@ a random list:{{ context iteration }}{{ for list in lists }}{{ for item in list 
         """
         context = {'name': 'John', 'age': '20', 'iteration': {'lists': [['one', 'two', 'three'], ['raz', 'dwa', '']]}}
         parsed = self.parser.parse(text, context)
-        print(parsed)
         expected = """
 Hi my name is John. I am 20 years old.
 a random list:
@@ -200,3 +213,7 @@ a random list:
         soup_got = BeautifulSoup(parsed, 'html.parser')
         soup_expected = BeautifulSoup(expected, 'html.parser')
         self.assertEqual(soup_got.prettify(), soup_expected.prettify())
+
+
+if __name__ == '__main__':
+    unittest.main()
