@@ -35,6 +35,8 @@ from abc import ABC, abstractmethod
 import re
 
 
+# LEXER =========================================================
+
 @dataclass
 class TokenBase:
     """Base class for all tokens"""
