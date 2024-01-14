@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <title>{{name}} Email Signature</title>
+</head>
+
+<body>
+
+<h1>{{name}} Email Signature</h1>
+
+{{ context contact_info }}
+<table>
+    {{ for email in emails }}
+    <tr>
+        <td>
+            <a href="mailto:{{email}}">{{email}}</a>
+        </td>
+    </tr>
+    {{ end for }}
+</table>
+<table>
+    {{ for phone in numbers }}
+    <tr>
+        <td>
+            <a href="tel:{{phone}}">{{phone}}</a>
+        </td>
+    </tr>
+    {{ end for }}
+</table>
+{{ end context }}
+
+</body>
+
+</html>

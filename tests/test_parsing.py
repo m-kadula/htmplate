@@ -1,6 +1,11 @@
 import unittest
+from pathlib import Path
 
 from htmplate.parsing import *
+from bs4 import BeautifulSoup
+
+
+RESOURCE_DIR = Path(__file__).parent / 'resources'
 
 
 class SimpleLexerTest(unittest.TestCase):
@@ -456,6 +461,23 @@ a random list:
     - empty :(
 """
         self.assertEqual(expected.strip(), parsed.strip())
+
+    def test_html(self):
+        with open(RESOURCE_DIR / 'test_footer.html') as f:
+            text = f.read()
+        with open(RESOURCE_DIR / 'test_footer_filled.html') as f:
+            expected = f.read()
+        context = {
+            "name": "John Doe",
+            "contact_info": {
+                "emails": ["john.doe@mail.com", "john.doe@gmail.com"],
+                "numbers": ["123456789", "123 456 789"]
+            }
+        }
+        parsed = self.parser.parse(text, context)
+        soup_got = BeautifulSoup(parsed, 'html.parser')
+        soup_expected = BeautifulSoup(expected, 'html.parser')
+        self.assertEqual(soup_got.prettify(), soup_expected.prettify())
 
 
 if __name__ == '__main__':
