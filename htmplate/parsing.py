@@ -385,10 +385,13 @@ class ControlField(Field):
         :param instruction: instruction to match
         :return: if a signature is found, return it; otherwise return None
         """
-        for field in cls.all_fields():
-            if field.match(instruction):
-                return field
-        return None
+        fields = [f for f in cls.all_fields() if f.match(instruction)]
+        if len(fields) > 1:
+            raise Parser.ParsingError(f'Field {instruction} is ambiguous. (Potential fields: {fields})')
+        elif len(fields) == 1:
+            return fields[0]
+        else:
+            return None
 
     def make_tree(self, start: int) -> int:
         index = start
@@ -505,11 +508,15 @@ class ContentNode(TreeNode):
         return {"type": self.__class__.__name__, "content": out}
 
     def _get_field(self, instruction: str) -> tuple[type[Field], ControlFieldSignature]:
-        for field_t in self.fields_t:
-            tmp = field_t.get_matching_signature(instruction)
-            if tmp is not None:
-                return field_t, tmp
-        raise Parser.ParsingError(f'No field found for {instruction}')
+        found = [ft for ft in self.fields_t if ft.get_matching_signature(instruction) is not None]
+        if len(found) > 1:
+            raise Parser.ParsingError(f'Field {instruction} is ambiguous. (Potential fields: {found})')
+        elif len(found) == 1:
+            field_t = found[0]
+            sig = field_t.get_matching_signature(instruction)
+            return field_t, sig
+        else:
+            raise Parser.ParsingError(f'No field found for {instruction}')
 
     def make_tree(self, start: int) -> int:
         out: list[Field | LeafNode | ContentNode] = []

@@ -1,0 +1,98 @@
+Walter White:
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <title>Walter White Email Signature</title>
+</head>
+
+<body>
+
+<h1>Walter White Email Signature</h1>
+
+
+<table>
+
+    <tr>
+        <td>
+            <a href="mailto:walter.white@gmail.com">walter.white@gmail.com</a>
+        </td>
+    </tr>
+
+    <tr>
+        <td>
+            <a href="mailto:waltuh@gmail.com">waltuh@gmail.com</a>
+        </td>
+    </tr>
+
+</table>
+<table>
+
+    <tr>
+        <td>
+            <a href="tel:+1 123 456 7890">+1 123 456 7890</a>
+        </td>
+    </tr>
+
+    <tr>
+        <td>
+            <a href="tel:+1 999 999 9999">+1 999 999 9999</a>
+        </td>
+    </tr>
+
+</table>
+
+
+</body>
+
+</html>
+
+
+Jessie Pinkman:
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <title>Jessie Pinkman Email Signature</title>
+</head>
+
+<body>
+
+<h1>Jessie Pinkman Email Signature</h1>
+
+
+<table>
+
+    <tr>
+        <td>
+            <a href="mailto:jessie.pinkman@gmail.com">jessie.pinkman@gmail.com</a>
+        </td>
+    </tr>
+
+    <tr>
+        <td>
+            <a href="mailto:jessie@icloud.com">jessie@icloud.com</a>
+        </td>
+    </tr>
+
+</table>
+<table>
+
+    <tr>
+        <td>
+            <a href="tel:+1 098 765 4321">+1 098 765 4321</a>
+        </td>
+    </tr>
+
+    <tr>
+        <td>
+            <a href="tel:+1 111 111 1111">+1 111 111 1111</a>
+        </td>
+    </tr>
+
+</table>
+
+
+</body>
+
+</html>

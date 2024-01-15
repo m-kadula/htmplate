@@ -23,18 +23,26 @@ def parse_context_path(context: dict, path: str) -> Any | None:
 
 class DataField(SingleField):
 
-    field = SingleField.make_field(r'\s*([0-9a-zA-Z_\.]+)\s*')
+    field = SingleField.make_field(r'\s*([0-9a-zA-Z_\.]+)(?:\s+with\s+([0-9a-zA-Z_\.]+))?\s*')
 
     def render(self, context: Any, inner_extra: dict) -> str:
         assert isinstance(self.content, ActiveToken)
         reg = re.compile(self.field.signature)
         match = reg.match(self.content.instruction)
         name = match.group(1)
+
         inner = parse_context_path(context, name)
-        if inner is not None:
-            return self.parser.parse(inner, context)
-        else:
+        if inner is None:
             return self.content.field_content
+
+        if match.group(2) is not None:
+            context_next = parse_context_path(context, match.group(2))
+            if context_next is not None:
+                context = context_next
+            else:
+                raise ValueError(f'Context path {match.group(2)} does not exist')
+
+        return self.parser.parse(inner, context)
 
 
 class FileInclude(SingleField):
@@ -103,7 +111,8 @@ class IterField(ControlField):
             content = node.render(mut_context | context, inner_extra)
             out.append(content)
 
-        return ''.join(out)
+        tmp = ''.join(out)
+        return self.parser.parse(tmp, context, **self.extra_context)
 
 
 class DictIterField(ControlField):
@@ -115,7 +124,7 @@ class DictIterField(ControlField):
     middle_fields = ControlField.middle()
 
     final_fields = ControlField.final(
-        ('end for', r'\s*end\s+for\s*')
+        ('end for', r'\s*end\s+dict\s+for\s*')
     )
 
     body = ControlField.make_body(
@@ -144,7 +153,8 @@ class DictIterField(ControlField):
             content = node.render(mut_context | context, inner_extra)
             out.append(content)
 
-        return ''.join(out)
+        tmp = ''.join(out)
+        return self.parser.parse(tmp, context, **self.extra_context)
 
 
 class ConditionalField(ControlField):

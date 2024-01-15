@@ -28,6 +28,13 @@ class ParsingTest(unittest.TestCase):
         parsed = self.parser.parse(text, context)
         self.assertEqual(parsed, 'Hi, my name is John. and I am from USA, NY. I am 20 years old.')
 
+    def test_data_field_with(self):
+        text = "Hi, my name is {{ name }}. and I am from {{ nested with dat.info }}."
+        context = {'name': 'John', 'nested': "{{ country }}, {{ town }}",
+                   'dat': {'info': {'country': 'USA', 'town': 'NY'}}}
+        parsed = self.parser.parse(text, context)
+        self.assertEqual(parsed, 'Hi, my name is John. and I am from USA, NY.')
+
     def test_no_val_in_context(self):
         text = "Hi, my name is {{ name }}. and I am from {{ country }}. I am {{ age }} years old."
         context = {'name': 'John', 'age': '20'}
@@ -56,11 +63,50 @@ class ParsingTest(unittest.TestCase):
         parsed = self.parser.parse(text, context)
         self.assertEqual(parsed, '')
 
+        text = "{{ for item in items }}item: {{ item }}\n{{ end for }}{{ item }}"
+        context = {'items': ['a', 'b', 'c']}
+        parsed = self.parser.parse(text, context)
+        self.assertEqual(parsed, 'item: a\nitem: b\nitem: c\n{{ item }}')
+
     def test_dict_iter(self):
-        text = "{{ for key, value in dct }}{{ key }}: {{ value }}\n{{ end for }}"
+        text = "{{ for key, value in dct }}{{ key }}: {{ value }}\n{{ end dict for }}"
         context = {'dct': {'a': '1', 'b': '2', 'c': '3'}}
         parsed = self.parser.parse(text, context)
         self.assertEqual(parsed, 'a: 1\nb: 2\nc: 3\n')
+
+    def test_iter_with_file(self):
+        text = ("{{ for con in lists }}{{ con.name }}:\n"
+                "{{ include test_footer.html with con }}\n\n{{ end for }}")
+        context = {
+            'lists': [
+                {
+                    "name": "Walter White",
+                    "contact_info": {
+                        "emails": ["walter.white@gmail.com", "waltuh@gmail.com"],
+                        "numbers": ["+1 123 456 7890", "+1 999 999 9999"]
+                    }
+                },
+                {
+                    "name": "Jessie Pinkman",
+                    "contact_info": {
+                        "emails": ["jessie.pinkman@gmail.com", "jessie@icloud.com"],
+                        "numbers": ["+1 098 765 4321", "+1 111 111 1111"]
+                    }
+                }
+            ]
+        }
+        parsed = self.parser.parse(text, context, fs_root=RESOURCE_DIR)
+        with open(RESOURCE_DIR / 'list_of_html_filled.txt') as f:
+            expected = f.read()
+        soup_got = BeautifulSoup(parsed, 'html.parser')
+        soup_expected = BeautifulSoup(expected, 'html.parser')
+        self.assertEqual(soup_got.prettify(), soup_expected.prettify())
+
+    def test_iter_recursion(self):
+        text = "{{ for item in items }}{{ recursive }}{{ end for }}"
+        context = {'items': ['a', 'b', 'c'], 'recursive': "{{name}}", 'name': 'John'}
+        parsed = self.parser.parse(text, context)
+        self.assertEqual(parsed, 'JohnJohnJohn')
 
     def test_if(self):
         text = "{{ if condition }}{{ name }}{{ end if }}"
