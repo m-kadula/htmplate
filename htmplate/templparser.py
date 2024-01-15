@@ -162,12 +162,14 @@ class ConditionalField(ControlField):
 
     initial_fields = ControlField.initial(
         ('if', r'\s*if\s+([0-9a-zA-Z_\.]+)\s*'),
-        ('if', r'\s*if:exists\s+([0-9a-zA-Z_\.]+)\s*')
+        ('if', r'\s*if:exists\s+([0-9a-zA-Z_\.]+)\s*'),
+        ('if', r'\s*if:typeof\s+([0-9a-zA-Z_\.]+)\s+(dict|list|str|int|float|bool)\s*'),
     )
 
     middle_fields = ControlField.middle(
         ('elif', r'\s*elif\s+([0-9a-zA-Z_\.]+)\s*'),
         ('elif', r'\s*elif:exists\s+([0-9a-zA-Z_\.]+)\s*'),
+        ('elif', r'\s*elif:typeof\s+([0-9a-zA-Z_\.]+)\s+(dict|list|str|int|float|bool)\s*'),
         ('else', r'\s*if:else\s*'),
     )
 
@@ -190,14 +192,25 @@ class ConditionalField(ControlField):
             if signature.name in ['else', 'end if']:
                 break
 
-            check_sig = self.initial_fields[1] if signature.name == 'if' else self.middle_fields[1]
+            check_sig = self.initial_fields if signature.name == 'if' else self.middle_fields
 
             reg = re.compile(signature.signature)
             match = reg.match(token.instruction)
             name = match.group(1)
             value = parse_context_path(context, name)
 
-            if signature == check_sig:
+            if signature == check_sig[2]:
+                if value is None:
+                    return self.get_original()
+                type_name = match.group(2)
+                t = {'dict': dict, 'list': list, 'str': str, 'int': int, 'float': float, 'bool': bool}.get(type_name)
+                if t is None:
+                    raise Parser.ParsingError(f'Unknown type "{type_name}"')
+                if isinstance(value, t):
+                    tmp = node.render(context, inner_extra)
+                    return self.parser.parse(tmp, context, **self.extra_context)
+
+            elif signature == check_sig[1]:
                 if value is not None:
                     tmp = node.render(context, inner_extra)
                     return self.parser.parse(tmp, context, **self.extra_context)

@@ -189,6 +189,32 @@ class ParsingTest(unittest.TestCase):
         parsed = self.parser.parse(text, context)
         self.assertEqual(parsed, '')
 
+    def test_if_type(self):
+        text = ("{{ if:typeof name str }}name: {{ name }}"
+                "{{elif:typeof name list}}names:\n"
+                "{{ for n in name }}\t{{ n }}\n{{ end for }}{{ end if }}")
+        context = {'name': 'John'}
+        parsed = self.parser.parse(text, context)
+        self.assertEqual(parsed, 'name: John')
+
+        context = {'name': ['John', 'Mike', 'Jack']}
+        parsed = self.parser.parse(text, context)
+        self.assertEqual(parsed, 'names:\n\tJohn\n\tMike\n\tJack\n')
+
+        text = "{{ if:typeof name dict }}dict{{ elif:exists name2 }}exists{{ if:else }}else{{ end if }}"
+        context = {'name': {'a': 1}, 'name2': 'Mike'}
+        parsed = self.parser.parse(text, context)
+        self.assertEqual(parsed, 'dict')
+
+        context = {'name': 12, 'name2': 'a'}
+        parsed = self.parser.parse(text, context)
+        self.assertEqual(parsed, 'exists')
+
+        context = {'name': 'a'}
+        parsed = self.parser.parse(text, context)
+        self.assertEqual(parsed, 'else')
+
+
     def test_context(self):
         text = "{{ context context_name }}{{ name }}{{ end context }}"
         context = {'context_name': {'name': 'John'}}
