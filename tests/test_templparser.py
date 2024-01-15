@@ -28,6 +28,32 @@ class ParsingTest(unittest.TestCase):
         parsed = self.parser.parse(text, context)
         self.assertEqual(parsed, 'Hi, my name is John. and I am from USA, NY. I am 20 years old.')
 
+    def test_indexing(self):
+        text = "{{ list.1.2 }} {{ list.0.name }} {{ dict.name }} {{ dict.null }} {{ list.20 }}"
+        context = {
+            'list': [
+                {'name': 'John', 'age': '20'},
+                [1, 2, 3, 4]
+            ],
+            'dict': {
+                'name': 'John',
+                'age': '20'
+            }
+        }
+        parsed = self.parser.parse(text, context)
+        self.assertEqual(parsed, '3 John John {{ dict.null }} {{ list.20 }}')
+
+    def test_types(self):
+        context = {
+            'int': 1,
+            'float': 3.141592653589793,
+            'str': 'John',
+            'bool': True,
+        }
+        text = "{{ int }} {{ float }} {{ str }} {{ bool }}"
+        parsed = self.parser.parse(text, context)
+        self.assertEqual(parsed, '1 3.141592653589793 John True')
+
     def test_data_field_with(self):
         text = "Hi, my name is {{ name }}. and I am from {{ nested with dat.info }}."
         context = {'name': 'John', 'nested': "{{ country }}, {{ town }}",

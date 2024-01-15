@@ -83,12 +83,15 @@ class LexerBase(ABC):
 class SimpleLexer(LexerBase):
     """A simple lexer that uses delimiters to tokenize a template"""
 
-    def tokenize(self, template: str) -> list[TokenBase]:
+    def tokenize(self, template: str | int | float | bool) -> list[TokenBase]:
         LEFT_DELIMITER = '{{'
         RIGHT_DELIMITER = '}}'
         tokens = []
         prev_end = 0
         tag_reg = re.compile(LEFT_DELIMITER + r'(.+?)' + RIGHT_DELIMITER)
+
+        if isinstance(template, (int, float, bool)):
+            return [InactiveToken(field_content=str(template), start=0, end=len(str(template)))]
 
         for mach in tag_reg.finditer(template):
             if prev_end != mach.start():

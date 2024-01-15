@@ -11,13 +11,14 @@ def parse_context_path(context: dict, path: str) -> Any | None:
         if isinstance(context, list):
             if not p.isnumeric():
                 return None
-            else:
-                context = context[int(p)]
+            ip = int(p)
+            if not (0 <= ip < len(context)):
+                return None
+            context = context[ip]
         else:
             if p not in context:
                 return None
-            else:
-                context = context[p]
+            context = context[p]
     return context
 
 
