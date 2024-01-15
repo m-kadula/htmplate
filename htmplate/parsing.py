@@ -274,7 +274,8 @@ class ControlField(Field):
         def get_next_name(self, state: set[int], name: str) -> int | None:
             names = [self.body[i][0] for i in state]
             if len(names) != len(set(names)):
-                raise Parser.ParsingError(f'Field {name} is ambiguous. (Potential fields: {names} contain duplicates)')
+                raise Parser.ParsingError(f'Defined body for {self.__class__.__name__} is non-deterministic'
+                                          f' (Potential fields after {name}: {names})')
             return next((i for i in state if self.body[i][0] == name), None)
 
         def start(self):
@@ -390,7 +391,7 @@ class ControlField(Field):
         """
         fields = [f for f in cls.all_fields() if f.match(instruction)]
         if len(fields) > 1:
-            raise Parser.ParsingError(f'Field {instruction} is ambiguous. (Potential fields: {fields})')
+            raise Parser.ParsingError(f'Many fields found for "{instruction}" (Potential fields: {fields})')
         elif len(fields) == 1:
             return fields[0]
         else:
@@ -408,10 +409,12 @@ class ControlField(Field):
 
             match = self.get_matching_signature(current_token.instruction)
             if match is None:
-                raise Parser.ParsingError(f'No field found for {current_token.instruction}')
+                raise Parser.ParsingError(f'Field for instruction "{current_token.instruction}" does not belong to '
+                                          f'"{self.__class__.__name__}"')
 
             if not machine.next(match.name):
-                raise Parser.ParsingError(f'Unexpected field {current_token.instruction}')
+                raise Parser.ParsingError(f'Unexpected field "{current_token.instruction}" '
+                                          f'for "{self.__class__.__name__}"')
 
             if match.f_type in [ControlFieldSignature.FieldType.INITIAL, ControlFieldSignature.FieldType.MIDDLE]:
                 content = self.parser.content_node_t(self.parser, self.tokens, self.fields_t, self.extra_context)
@@ -422,7 +425,7 @@ class ControlField(Field):
                 self.content = out
                 return index + 1
 
-        raise Parser.ParsingError('Unexpected end of template')
+        raise Parser.ParsingError(f'End of template reached before body of "{self.__class__.__name__}" was closed')
 
     def get_original(self) -> str:
         out: list[str] = []
@@ -486,7 +489,8 @@ class SingleField(Field):
         token = self.tokens[start]
         assert isinstance(token, ActiveToken)
         if not self.get_field().match(token.instruction):
-            raise Parser.ParsingError(f'No field found for {token.instruction}')
+            raise Parser.ParsingError(f'Instruction "{token.instruction}" '
+                                      f'does not match field {self.__class__.__name__}')
         self.content = token
         return start + 1
 
@@ -513,13 +517,13 @@ class ContentNode(TreeNode):
     def _get_field(self, instruction: str) -> tuple[type[Field], ControlFieldSignature]:
         found = [ft for ft in self.fields_t if ft.get_matching_signature(instruction) is not None]
         if len(found) > 1:
-            raise Parser.ParsingError(f'Field {instruction} is ambiguous. (Potential fields: {found})')
+            raise Parser.ParsingError(f'More than one field found for "{instruction}" (Found fields: {found})')
         elif len(found) == 1:
             field_t = found[0]
             sig = field_t.get_matching_signature(instruction)
             return field_t, sig
         else:
-            raise Parser.ParsingError(f'No field found for {instruction}')
+            raise Parser.ParsingError(f'No field found for "{instruction}"')
 
     def make_tree(self, start: int) -> int:
         out: list[Field | LeafNode | ContentNode] = []
@@ -617,7 +621,8 @@ class Parser:
         root = self.content_node_t(self, tokens, self.field_types, extra_context)
         out = root.make_tree(0)
         if out != len(tokens):
-            raise Parser.ParsingError('Unexpected end of template')
+            raise Parser.ParsingError(f'Unexpected token "{tokens[out]}";'
+                                      f' parsing has ended prematurely')
         return root
 
     def parse(self, template: str, context: Any, **extra_context) -> str:

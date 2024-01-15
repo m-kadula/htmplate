@@ -214,7 +214,6 @@ class ParsingTest(unittest.TestCase):
         parsed = self.parser.parse(text, context)
         self.assertEqual(parsed, 'else')
 
-
     def test_context(self):
         text = "{{ context context_name }}{{ name }}{{ end context }}"
         context = {'context_name': {'name': 'John'}}
