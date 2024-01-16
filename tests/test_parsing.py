@@ -6,24 +6,43 @@ from htmplate.templparser import DataField, ContextField, IterField, Conditional
 
 class SimpleLexerTest(unittest.TestCase):
 
+    @staticmethod
+    def it(x, y, z):
+        return InactiveToken(field_content=x, start=y, end=z)
+
+    @staticmethod
+    def at(x, t, y, z):
+        return ActiveToken(instruction=x, field_content=t, start=y, end=z)
+
+    def test_many_delimiters(self):
+        lexer = SimpleLexer([('{{', '}}'), ('{%', '%}')])
+        text = "My names are {% for name in names %}name: {{ name }}.{% end for %}."
+        tmp = lexer.tokenize(text)
+        self.assertEqual(tmp,
+                         [
+                                self.it('My names are ', 0, 13),
+                                self.at(' for name in names ', '{% for name in names %}', 13, 36),
+                                self.it('name: ', 36, 42),
+                                self.at(' name ', '{{ name }}', 42, 52),
+                                self.it('.', 52, 53),
+                                self.at(' end for ', '{% end for %}', 53, 66),
+                                self.it('.', 66, 67)
+                         ])
+
     def test_basic(self):
-        def it(x, y, z):
-            return InactiveToken(field_content=x, start=y, end=z)
-
-        def at(x, t, y, z):
-            return ActiveToken(instruction=x, field_content=t, start=y, end=z)
-
-        text = "Hi, my name is {{name}}. and I am from {{country}}. I am {{age}} years old."
+        text = "Hi, my name is {{name}}. and I am from {{country}}. I am {{age}} years old {{}} ."
         lexer = SimpleLexer()
         tokens = lexer.tokenize(text)
-        self.assertEqual(len(tokens), 7)
-        self.assertEqual([it('Hi, my name is ', 0, 15),
-                          at('name', '{{name}}', 15, 23),
-                          it('. and I am from ', 23, 39),
-                          at('country', '{{country}}', 39, 50),
-                          it('. I am ', 50, 57),
-                          at('age', '{{age}}', 57, 64),
-                          it(' years old.', 64, 75)],
+        self.assertEqual(len(tokens), 9)
+        self.assertEqual([self.it('Hi, my name is ', 0, 15),
+                          self.at('name', '{{name}}', 15, 23),
+                          self.it('. and I am from ', 23, 39),
+                          self.at('country', '{{country}}', 39, 50),
+                          self.it('. I am ', 50, 57),
+                          self.at('age', '{{age}}', 57, 64),
+                          self.it(' years old ', 64, 75),
+                          self.at('', '{{}}', 75, 79),
+                          self.it(' .', 79, 81)],
                          tokens)
 
     def test_empty(self):
