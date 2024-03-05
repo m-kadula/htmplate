@@ -119,7 +119,7 @@ class SimpleLexer(LexerBase):
 
 # PARSER ========================================================
 
-class TreeNode(ABC):
+class TreeNodeFactory(ABC):
     """Base class for all nodes in the parse tree"""
 
     def __init__(self, parser: Parser, tokens: list[TokenBase], fields_t: list[type[Field]], extra_context: Any = None):
@@ -129,7 +129,7 @@ class TreeNode(ABC):
         self.extra_context = extra_context
 
     @abstractmethod
-    def make_tree(self, start: int) -> int:
+    def make_tree(self, start: int) -> tuple[TreeNode2, int]:
         """
         Make a tree from the tokens. This tree should be a recursive structure stored
         inside implementing class.
@@ -137,6 +137,14 @@ class TreeNode(ABC):
         :param start: index of the first token to parse
         :return: the next token to parse
         """
+        pass
+
+
+class TreeNode2(ABC):
+
+    @abstractmethod
+    @property
+    def factory(self) -> TreeNodeFactory:
         pass
 
     @abstractmethod
@@ -169,48 +177,16 @@ class TreeNode(ABC):
 class FieldSignature(ABC):
     """Base class for all field signatures"""
 
-    def __init__(self, signature: str):
-        self.signature = signature
-
-    def match(self, text: str) -> bool:
-        """
-        Check if the signature matches the text
-
-        :param text: The text to match
-        :return: true if the signature matches the text
-        """
-        regex = re.compile(self.signature)
-        return regex.fullmatch(text) is not None
-
-
-class ControlFieldSignature(FieldSignature):
-    """Signature for control fields"""
-
-    class FieldType(Enum):
-        INITIAL = 0
-        MIDDLE = 1
-        FINAL = 2
-
-    def __init__(self, name: str, f_type: FieldType, signature: str, occurrences: tuple[int, int] = (1, 1)):
-        super().__init__(signature)
+    def __init__(self, name: str):
         self.name = name
-        self.f_type = f_type
-        self.occurrences = occurrences
 
-    def __eq__(self, other):
-        if not isinstance(other, ControlFieldSignature):
-            return False
-        return self.name == other.name and self.f_type == other.f_type and self.signature == other.signature
+    @abstractmethod
+    def is_a_match(self, text: str) -> bool:
+        pass
 
-    def __repr__(self):
-        return f'<{self.__class__.__name__} type={self.f_type} signature={self.signature!r}>'
-
-
-class SingleFieldSignature(FieldSignature):
-    """Signature for single fields"""
-
-    def __repr__(self):
-        return f'<{self.__class__.__name__} signature={self.signature!r}>'
+    @abstractmethod
+    def construct(self, text: str) -> dict:
+        pass
 
 
 class Field(TreeNode):
@@ -317,9 +293,9 @@ class ControlField(Field):
                 lower, upper = self.body[self.index][1]
                 return self.current_occurrences <= upper
 
-    initial_fields: list[ControlFieldSignature] = None
-    middle_fields: list[ControlFieldSignature] = None
-    final_fields: list[ControlFieldSignature] = None
+    initial_fields: list[type[FieldSignature]] = None
+    middle_fields: list[type[FieldSignature]] = None
+    final_fields: list[type[FieldSignature]] = None
     body: list[tuple[str, tuple[int, int]]] = None
 
     @staticmethod
@@ -341,35 +317,35 @@ class ControlField(Field):
             out.append((name, occurrences))
         return out
 
-    @staticmethod
-    def initial(*fields: tuple[str, str]) -> list[ControlFieldSignature]:
-        """
-        Creates a list of initial fields. This should be used to initialise the initial_fields attribute.
-
-        :param fields: a list of tuples of (name, signature) where signature is a regex that matches the field
-        """
-        return list(map(lambda x: ControlFieldSignature(x[0], ControlFieldSignature.FieldType.INITIAL, x[1]), fields))
-
-    @staticmethod
-    def middle(*fields: tuple[str, str]) -> list[ControlFieldSignature]:
-        """
-        Creates a list of middle fields. This should be used to initialise the middle_fields attribute.
-        :param fields: a list of tuples of (name, signature) where signature is a regex that matches the field
-        """
-        return list(map(lambda x: ControlFieldSignature(x[0], ControlFieldSignature.FieldType.MIDDLE, x[1]), fields))
-
-    @staticmethod
-    def final(*fields: tuple[str, str]) -> list[ControlFieldSignature]:
-        """
-        Creates a list of final fields. This should be used to initialise the final_fields attribute.
-
-        :param fields: a list of tuples of (name, signature) where signature is a regex that matches the field
-        """
-        return list(map(lambda x: ControlFieldSignature(x[0], ControlFieldSignature.FieldType.FINAL, x[1]), fields))
+    # @staticmethod
+    # def initial(*fields: tuple[str, str]) -> list[FieldSignature]:
+    #     """
+    #     Creates a list of initial fields. This should be used to initialise the initial_fields attribute.
+    #
+    #     :param fields: a list of tuples of (name, signature) where signature is a regex that matches the field
+    #     """
+    #     return list(map(lambda x: ControlFieldSignature(x[0], FieldSignature.FieldType.INITIAL, x[1]), fields))
+    #
+    # @staticmethod
+    # def middle(*fields: tuple[str, str]) -> list[ControlFieldSignature]:
+    #     """
+    #     Creates a list of middle fields. This should be used to initialise the middle_fields attribute.
+    #     :param fields: a list of tuples of (name, signature) where signature is a regex that matches the field
+    #     """
+    #     return list(map(lambda x: ControlFieldSignature(x[0], ControlFieldSignature.FieldType.MIDDLE, x[1]), fields))
+    #
+    # @staticmethod
+    # def final(*fields: tuple[str, str]) -> list[ControlFieldSignature]:
+    #     """
+    #     Creates a list of final fields. This should be used to initialise the final_fields attribute.
+    #
+    #     :param fields: a list of tuples of (name, signature) where signature is a regex that matches the field
+    #     """
+    #     return list(map(lambda x: ControlFieldSignature(x[0], ControlFieldSignature.FieldType.FINAL, x[1]), fields))
 
     def __init__(self, parser: Parser, tokens: list[TokenBase], fields_t: list[type[Field]], extra_context: Any = None):
         super().__init__(parser, tokens, fields_t, extra_context)
-        self.content: list[tuple[ControlFieldSignature, ActiveToken, ContentNode]] = None
+        self.content: list[tuple[FieldSignature, ActiveToken, ContentNode]] = None
 
     def to_json(self) -> Any:
         out = []
@@ -383,19 +359,19 @@ class ControlField(Field):
         return {"type": self.__class__.__name__, "content": out}
 
     @classmethod
-    def all_fields(cls) -> list[ControlFieldSignature]:
+    def all_fields(cls) -> list[FieldSignature]:
         """:return: all fields (initial, middle and final)"""
         return cls.initial_fields + cls.middle_fields + cls.final_fields
 
     @classmethod
-    def get_matching_signature(cls, instruction: str) -> ControlFieldSignature | None:
+    def get_matching_signature(cls, instruction: str) -> FieldSignature | None:
         """
         Get the signature that matches the instruction
 
         :param instruction: instruction to match
         :return: if a signature is found, return it; otherwise return None
         """
-        fields = [f for f in cls.all_fields() if f.match(instruction)]
+        fields = [f for f in cls.all_fields() if f.is_a_match(instruction)]
         if len(fields) > 1:
             raise Parser.ParsingError(f'Many fields found for "{instruction}" (Potential fields: {fields})')
         elif len(fields) == 1:
@@ -407,7 +383,7 @@ class ControlField(Field):
         index = start
         machine = self.BodyStateMachine(self.body)
         machine.start()
-        out: list[tuple[ControlFieldSignature, ActiveToken, ContentNode]] = []
+        out: list[tuple[FieldSignature, ActiveToken, ContentNode]] = []
 
         while index < len(self.tokens):
             current_token = self.tokens[index]
@@ -423,7 +399,7 @@ class ControlField(Field):
                                           f'for "{self.__class__.__name__}"')
 
             if match.f_type in [ControlFieldSignature.FieldType.INITIAL, ControlFieldSignature.FieldType.MIDDLE]:
-                content = self.parser.content_node_t(self.parser, self.tokens, self.fields_t, self.extra_context)
+                content = self.parser.content_factory_t(self.parser, self.tokens, self.fields_t, self.extra_context)
                 index = content.make_tree(index + 1)
                 out.append((match, current_token, content))
             else:
@@ -457,7 +433,7 @@ class SingleField(Field):
     The render method should be implemented to render the field.
     """
 
-    field: SingleFieldSignature = None
+    field: FieldSignature = None
 
     @staticmethod
     def make_field(regex: str) -> SingleFieldSignature:
@@ -508,19 +484,9 @@ class SingleField(Field):
         pass
 
 
-class ContentNode(TreeNode):
+class ContentNodeFactory(TreeNodeFactory):
 
-    def __init__(self, parser: Parser, tokens: list[TokenBase], fields_t: list[type[Field]], extra_context: Any = None):
-        super().__init__(parser, tokens, fields_t, extra_context)
-        self.children: list[Field | LeafNode | ContentNode] = None
-
-    def to_json(self) -> Any:
-        out = []
-        for child in self.children:
-            out.append(child.to_json())
-        return {"type": self.__class__.__name__, "content": out}
-
-    def _get_field(self, instruction: str) -> tuple[type[Field], ControlFieldSignature]:
+    def _get_field(self, instruction: str) -> tuple[type[Field], FieldSignature]:
         found = [ft for ft in self.fields_t if ft.get_matching_signature(instruction) is not None]
         if len(found) > 1:
             raise Parser.ParsingError(f'More than one field found for "{instruction}" (Found fields: {found})')
@@ -531,7 +497,7 @@ class ContentNode(TreeNode):
         else:
             raise Parser.ParsingError(f'No field found for "{instruction}"')
 
-    def make_tree(self, start: int) -> int:
+    def make_tree(self, start: int) -> tuple[ContentNode, int]:
         out: list[Field | LeafNode | ContentNode] = []
 
         current = start
@@ -540,7 +506,7 @@ class ContentNode(TreeNode):
 
             if isinstance(token, ActiveToken):
                 field_t, sig = self._get_field(token.instruction)
-                if isinstance(sig, ControlFieldSignature):
+                if isinstance(sig, FieldSignature):
                     if sig.f_type in [ControlFieldSignature.FieldType.MIDDLE, ControlFieldSignature.FieldType.FINAL]:
                         self.children = out
                         return current
@@ -549,43 +515,67 @@ class ContentNode(TreeNode):
                 out.append(field)
 
             elif isinstance(token, InactiveToken):
-                child = self.parser.leaf_node_t(self.parser, self.tokens, self.fields_t, self.extra_context)
-                current = child.make_tree(current)
-                out.append(child)
+                factory = self.parser.leaf_factory_t(self.parser, self.tokens, self.fields_t, self.extra_context)
+                leaf_node, current = factory.make_tree(current)
+                out.append(leaf_node)
 
             else:
                 raise TypeError(f'Unknown token type {type(token)}')
 
-        self.children = out
-        return current
+        node = ContentNode(self, out)
+        return node, current
+
+
+class ContentNode(TreeNode2):
+
+    def __init__(self, factory: ContentNodeFactory, content: list[Field | LeafNode | ContentNode]):
+        self._factory = factory
+        self.content = content
+
+    @property
+    def factory(self) -> ContentNodeFactory:
+        return self._factory
+
+    def to_json(self) -> Any:
+        out = []
+        for child in self.content:
+            out.append(child.to_json())
+        return {"type": self.__class__.__name__, "content": out}
 
     def get_original(self) -> str:
         out: list[str] = []
-        for child in self.children:
+        for child in self.content:
             out.append(child.get_original())
         return ''.join(out)
 
     def render(self, context: Any, inner_extra: dict) -> str:
         out: list[str] = []
-        for child in self.children:
+        for child in self.content:
             out.append(child.render(context, inner_extra))
         return ''.join(out)
 
 
-class LeafNode(TreeNode):
+class LeafNodeFactory(TreeNodeFactory):
 
-    def __init__(self, parser: Parser, tokens: list[TokenBase], fields_t: list[type[Field]], extra_context: Any = None):
-        super().__init__(parser, tokens, fields_t, extra_context)
-        self.content: InactiveToken = None
+    def make_tree(self, start: int) -> tuple[LeafNode, int]:
+        token = self.tokens[start]
+        assert isinstance(token, InactiveToken)
+        node = LeafNode(self, token)
+        return node, start + 1
+
+
+class LeafNode(TreeNode2):
+
+    def __init__(self, factory: LeafNodeFactory, content: InactiveToken):
+        self._factory = factory
+        self.content = content
+
+    @property
+    def factory(self) -> LeafNodeFactory:
+        return self._factory
 
     def to_json(self) -> Any:
         return {"type": self.__class__.__name__, "content": repr(self.content)}
-
-    def make_tree(self, start: int) -> int:
-        token = self.tokens[start]
-        assert isinstance(token, InactiveToken)
-        self.content = token
-        return start + 1
 
     def get_original(self) -> str:
         return self.content.field_content
@@ -608,10 +598,10 @@ class Parser:
     def __init__(self,
                  lexer: LexerBase,
                  field_types: list[type[ControlField]],
-                 content_node_t: type[ContentNode] = ContentNode,
-                 leaf_node_t: type[LeafNode] = LeafNode):
-        self.content_node_t = content_node_t
-        self.leaf_node_t = leaf_node_t
+                 content_factory_t: type[ContentNodeFactory] = ContentNode,
+                 leaf_factory_t: type[LeafNodeFactory] = LeafNode):
+        self.content_factory_t = content_factory_t
+        self.leaf_factory_t = leaf_factory_t
         self.lexer = lexer
         self.field_types = field_types
 
@@ -624,7 +614,7 @@ class Parser:
         :return: abstract syntax tree
         """
         tokens = self.lexer.tokenize(template)
-        root = self.content_node_t(self, tokens, self.field_types, extra_context)
+        root = self.content_factory_t(self, tokens, self.field_types, extra_context)
         out = root.make_tree(0)
         if out != len(tokens):
             raise Parser.ParsingError(f'Unexpected token "{tokens[out]}";'
