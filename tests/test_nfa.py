@@ -7,9 +7,9 @@ class ENFATest(unittest.TestCase):
 
     def test_alt(self):
         exp = automata.ReAlt(content=[
-            automata.GroundNode('a'),
-            automata.GroundNode('b'),
-            automata.GroundNode('c')
+            automata.ReGroundNode('a'),
+            automata.ReGroundNode('b'),
+            automata.ReGroundNode('c')
         ])
         enfa = automata.ENFA.parse(exp)
         self.assertEqual({
@@ -27,9 +27,9 @@ class ENFATest(unittest.TestCase):
 
     def test_cat(self):
         exp = automata.ReCat(content=[
-            automata.GroundNode('a'),
-            automata.GroundNode('b'),
-            automata.GroundNode('c')
+            automata.ReGroundNode('a'),
+            automata.ReGroundNode('b'),
+            automata.ReGroundNode('c')
         ])
         enfa = automata.ENFA.parse(exp)
         self.assertEqual({
@@ -43,7 +43,7 @@ class ENFATest(unittest.TestCase):
         }, enfa.dict)
 
     def test_item(self):
-        exp = automata.ReItem(content=automata.GroundNode('a'), min_=2, max_=4)
+        exp = automata.ReItem(content=automata.ReGroundNode('a'), min_=2, max_=4)
         enfa = automata.ENFA.parse(exp)
         self.assertEqual({
             (0, ''): {2},
@@ -57,7 +57,7 @@ class ENFATest(unittest.TestCase):
             (9, ''): {1}
         }, enfa.dict)
 
-        exp = automata.ReItem(content=automata.GroundNode('a'), min_=1, max_=1)
+        exp = automata.ReItem(content=automata.ReGroundNode('a'), min_=1, max_=1)
         enfa = automata.ENFA.parse(exp)
         self.assertEqual({
             (0, ''): {2},
@@ -65,7 +65,7 @@ class ENFATest(unittest.TestCase):
             (3, ''): {1}
         }, enfa.dict)
 
-        exp = automata.ReItem(content=automata.GroundNode('a'), min_=0, max_=float('inf'))
+        exp = automata.ReItem(content=automata.ReGroundNode('a'), min_=0, max_=float('inf'))
         enfa = automata.ENFA.parse(exp)
         self.assertEqual({
             (0, ''): {1, 2},
@@ -76,10 +76,10 @@ class ENFATest(unittest.TestCase):
     def test_recursion(self):
         exp = automata.ReCat(content=[
             automata.ReAlt(content=[
-                automata.GroundNode('a'),
-                automata.GroundNode('b')
+                automata.ReGroundNode('a'),
+                automata.ReGroundNode('b')
             ]),
-            automata.ReItem(content=automata.GroundNode('c'), min_=1, max_=2)
+            automata.ReItem(content=automata.ReGroundNode('c'), min_=1, max_=2)
         ])
         enfa = automata.ENFA.parse(exp)
         self.assertEqual({
@@ -103,9 +103,9 @@ class NFATest(unittest.TestCase):
 
     def test_alt(self):
         exp = automata.ReAlt(content=[
-            automata.GroundNode('a'),
-            automata.GroundNode('b'),
-            automata.GroundNode('c')
+            automata.ReGroundNode('a'),
+            automata.ReGroundNode('b'),
+            automata.ReGroundNode('c')
         ])
         enfa = automata.ENFA.parse(exp)
         nfa = automata.NFA.from_enfa(enfa)

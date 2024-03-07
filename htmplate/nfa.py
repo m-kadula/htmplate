@@ -26,9 +26,10 @@ class ReNode(ABC):
         pass
 
 
-class GroundNode(ReNode):
+class ReGroundNode(ReNode):
 
     def __init__(self, content: str):
+        assert content != ''
         self.content = content
 
     def parse(self, context: Context) -> tuple[int, int]:
