@@ -1,137 +1,138 @@
+from abc import ABC, abstractmethod
 from typing import Literal
-from dataclasses import dataclass
 from functools import reduce
 
 
-@dataclass
-class ReNode:
-    pass
+class Context:
+
+    def __init__(self):
+        self.dict: dict[tuple[int, str], set[int]] = {}
+        self.last_state = 0
+
+    def get_new_state(self) -> int:
+        self.last_state += 1
+        return self.last_state - 1
+
+    def add_transition(self, state: int, letter: str, s: set[int]):
+        if (state, letter) not in self.dict:
+            self.dict[(state, letter)] = set()
+        self.dict[(state, letter)].update(s)
 
 
-@dataclass
+class ReNode(ABC):
+
+    @abstractmethod
+    def parse(self, context: Context) -> tuple[int, int]:
+        pass
+
+
 class GroundNode(ReNode):
-    content: str
+
+    def __init__(self, content: str):
+        self.content = content
+
+    def parse(self, context: Context) -> tuple[int, int]:
+        my_start_state = context.get_new_state()
+        my_end_state = context.get_new_state()
+        context.add_transition(my_start_state, self.content, {my_end_state})
+        return my_start_state, my_end_state
 
 
-@dataclass
 class ReItem(ReNode):
-    content: ReNode
-    min_: int
-    max_: int | Literal['float("inf")']
+
+    def __init__(self, content: ReNode, min_: int, max_: int | Literal['float("inf")']):
+        assert max_ >= min_ and max_ > 0
+        self.content = content
+        self.min_ = min_
+        self.max_ = max_
+
+    def parse(self, context: Context) -> tuple[int, int]:
+        my_start_state = context.get_new_state()
+        my_end_state = context.get_new_state()
+        prev_end = my_start_state
+        for i in range(self.min_):
+            start, end = self.content.parse(context)
+            context.add_transition(prev_end, '', {start})
+            prev_end = end
+        if self.max_ != float('inf'):
+            for i in range(self.min_, self.max_):
+                start, end = self.content.parse(context)
+                context.add_transition(prev_end, '', {start, my_end_state})
+                prev_end = end
+            context.add_transition(prev_end, '', {my_end_state})
+        else:
+            start, end = self.content.parse(context)
+            context.add_transition(prev_end, '', {start, my_end_state})
+            context.add_transition(end, '', {start, my_end_state})
+        return my_start_state, my_end_state
 
 
-@dataclass
 class ReAlt(ReNode):
-    content: list[ReNode]
+
+    def __init__(self, content: list[ReNode]):
+        self.content = content
+
+    def parse(self, context: Context) -> tuple[int, int]:
+        my_start_state = context.get_new_state()
+        my_end_state = context.get_new_state()
+        for item in self.content:
+            start, end = item.parse(context)
+            context.add_transition(my_start_state, '', {start})
+            context.add_transition(end, '', {my_end_state})
+        return my_start_state, my_end_state
 
 
-@dataclass
 class ReCat(ReNode):
-    content: list[ReNode]
+
+    def __init__(self, content: list[ReNode]):
+        self.content = content
+
+    def parse(self, context: Context) -> tuple[int, int]:
+        my_start_state = context.get_new_state()
+        my_end_state = context.get_new_state()
+        prev_end = my_start_state
+        for item in self.content:
+            start, end = item.parse(context)
+            context.add_transition(prev_end, '', {start})
+            prev_end = end
+        context.add_transition(prev_end, '', {my_end_state})
+        return my_start_state, my_end_state
 
 
 class ENFA:
 
-    class Context:
-
-        def __init__(self):
-            self.dict: dict[tuple[int, str], set[int]] = {}
-            self.last_state = 0
-
-        def get_new_state(self) -> int:
-            self.last_state += 1
-            return self.last_state - 1
-
-        def add_transition(self, state: int, letter: str, s: set[int]):
-            if (state, letter) not in self.dict:
-                self.dict[(state, letter)] = set()
-            self.dict[(state, letter)].update(s)
-
-    def __init__(self, start_state: int, end_state: int, states: range, dict_: dict[tuple[int, str], set[int]]):
-        assert states.start == 0
+    def __init__(self,
+                 start_state: int,
+                 end_state: int,
+                 states: range,
+                 alphabet: set[str],
+                 dict_: dict[tuple[int, str], set[int]]):
+        assert states.start == 0 and states.step in [1, None]
         self.states = states
-        self.alphabet = {s for _, s in dict_.keys()}.difference({''})
+        self.alphabet = alphabet
         self.start_state = start_state
         self.end_state = end_state
         self.dict = dict_
 
     @classmethod
     def parse(cls, node: ReNode) -> 'ENFA':
-        context = cls.Context()
-        start, end = cls._parse_any(node, context)
-        return cls(start, end, range(context.last_state), context.dict)
-
-    @classmethod
-    def _parse_alt(cls, node: ReAlt, context: Context) -> tuple[int, int]:
-        my_start_state = context.get_new_state()
-        my_end_state = context.get_new_state()
-        for item in node.content:
-            start, end = cls._parse_any(item, context)
-            context.add_transition(my_start_state, '', {start})
-            context.add_transition(end, '', {my_end_state})
-        return my_start_state, my_end_state
-
-    @classmethod
-    def _parse_cat(cls, node: ReCat, context: Context) -> tuple[int, int]:
-        my_start_state = context.get_new_state()
-        my_end_state = context.get_new_state()
-        prev_end = my_start_state
-        for item in node.content:
-            start, end = cls._parse_any(item, context)
-            context.add_transition(prev_end, '', {start})
-            prev_end = end
-        context.add_transition(prev_end, '', {my_end_state})
-        return my_start_state, my_end_state
-
-    @classmethod
-    def _parse_item(cls, node: ReItem, context: Context) -> tuple[int, int]:
-        assert node.max_ >= node.min_ and node.max_ > 0
-        my_start_state = context.get_new_state()
-        my_end_state = context.get_new_state()
-        prev_end = my_start_state
-        for i in range(node.min_):
-            start, end = cls._parse_any(node.content, context)
-            context.add_transition(prev_end, '', {start})
-            prev_end = end
-        if node.max_ != float('inf'):
-            for i in range(node.min_, node.max_):
-                start, end = cls._parse_any(node.content, context)
-                context.add_transition(prev_end, '', {start, my_end_state})
-                prev_end = end
-            context.add_transition(prev_end, '', {my_end_state})
-        else:
-            start, end = cls._parse_any(node.content, context)
-            context.add_transition(prev_end, '', {start, my_end_state})
-            context.add_transition(end, '', {start, my_end_state})
-        return my_start_state, my_end_state
-
-    @classmethod
-    def _parse_ground(cls, node: GroundNode, context: Context) -> tuple[int, int]:
-        my_start_state = context.get_new_state()
-        my_end_state = context.get_new_state()
-        context.add_transition(my_start_state, node.content, {my_end_state})
-        return my_start_state, my_end_state
-
-    @classmethod
-    def _parse_any(cls, item: ReNode, context: Context) -> tuple[int, int]:
-        if isinstance(item, ReAlt):
-            return cls._parse_alt(item, context)
-        elif isinstance(item, ReCat):
-            return cls._parse_cat(item, context)
-        elif isinstance(item, ReItem):
-            return cls._parse_item(item, context)
-        elif isinstance(item, GroundNode):
-            return cls._parse_ground(item, context)
-        else:
-            raise ValueError(f'Unknown type {type(item)}')
+        context = Context()
+        start, end = node.parse(context)
+        alphabet = {s for _, s in context.dict.keys()}.difference({''})
+        return cls(start, end, range(context.last_state), alphabet, context.dict)
 
 
 class NFA:
 
-    def __init__(self, start_state: int, end_states: set[int], states: range, dict_: dict[tuple[int, str], set[int]]):
-        assert states.start == 0
+    def __init__(self,
+                 start_state: int,
+                 end_states: set[int],
+                 states: range,
+                 alphabet: set[str],
+                 dict_: dict[tuple[int, str], set[int]]):
+        assert states.start == 0 and states.step in [1, None]
         self.states = states
-        self.alphabet = {s for _, s in dict_.keys()}.difference({''})
+        self.alphabet = alphabet
         self.start_state = start_state
         self.end_states = end_states
         self.dict = dict_
@@ -161,7 +162,8 @@ class NFA:
             if enfa.end_state in e_closures[state]:
                 new_end_states.add(state)
 
-        return cls(enfa.start_state, new_end_states, enfa.states, new_dict)
+        alphabet = {s for _, s in new_dict.keys()}.difference({''})
+        return cls(enfa.start_state, new_end_states, enfa.states, alphabet, new_dict)
 
     @classmethod
     def _compute_epsilon_closure(cls, enfa: ENFA) -> dict[int, set[int]]:
