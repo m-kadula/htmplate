@@ -136,7 +136,7 @@ class NonDeterministicAutomata:
 
     @property
     def is_normalised(self) -> bool:
-        return self.states == set(range(max(self.states) + 1)) and self.start_state == 0
+        return self.states == set(range(len(self.states))) and self.start_state == 0
 
     def normalise(self):
         transition = (
@@ -155,7 +155,7 @@ class ENFA(NonDeterministicAutomata):
     def parse(cls, node: ReNode) -> 'ENFA':
         context = Context()
         start, end = node.parse(context)
-        alphabet = {s for _, s in context.dict.keys()}.difference({NonDeterministicAutomata.Epsilon})
+        alphabet = {s for _, s in context.dict.keys()}.difference({cls.Epsilon})
         states = set(range(context.last_state))
         return cls(start, {end}, states, alphabet, context.dict)
 
@@ -213,7 +213,7 @@ class NFA(NonDeterministicAutomata):
             adj_matrix[i][i] = True
 
         for (v, s), w_set in dict_.items():
-            if s == NonDeterministicAutomata.Epsilon:
+            if s == cls.Epsilon:
                 for w in w_set:
                     adj_matrix[v][w] = True
 
@@ -261,7 +261,7 @@ class NFA(NonDeterministicAutomata):
             adj_matrix[i][i] = True
 
         for (v, s), w_set in self.dict.items():
-            assert s != NonDeterministicAutomata.Epsilon
+            assert s != self.Epsilon
             for w in w_set:
                 adj_matrix[v][w] = True
 

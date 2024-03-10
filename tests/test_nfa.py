@@ -99,7 +99,7 @@ class ENFATest(unittest.TestCase):
             (13, automata.NonDeterministicAutomata.Epsilon): {9}
         }, enfa.dict)
 
-    def test_normalised(self):
+    def test_normalisation(self):
         a = automata.ENFA(0, {5}, {0, 1, 2, 3, 4, 5}, {'a'}, {})
         self.assertTrue(a.is_normalised)
         b = automata.ENFA(
@@ -115,7 +115,7 @@ class ENFATest(unittest.TestCase):
 
 class NFATest(unittest.TestCase):
 
-    def test_alt(self):
+    def test_simple(self):
         exp = automata.ReAlt(content=[
             automata.ReGroundNode('a'),
             automata.ReGroundNode('b'),
@@ -151,6 +151,26 @@ class NFATest(unittest.TestCase):
         self.assertFalse(nfa.match(['if', ..., 'elif', 'elif', ..., 'else', ..., 'endif']))
         self.assertFalse(nfa.match(['if', ..., 'elif', ..., 'elif', ..., 'else', ...]))
         self.assertFalse(nfa.match(['if']))
+
+    def test_for_statement(self):
+        exp = automata.ReCat(content=[
+            automata.ReGroundNode('for'),
+            automata.ReItem(automata.ReGroundNode(...), min_=0, max_=float('inf')),
+            automata.ReItem(content=automata.ReAlt(content=[
+                    automata.ReGroundNode('break'),
+                    automata.ReGroundNode('continue')
+                ]), min_=1, max_=3),
+            automata.ReItem(automata.ReGroundNode(...), min_=0, max_=float('inf'))
+        ])
+        nfa = automata.get_automata(exp)
+        self.assertTrue(nfa.match(['for', ..., ..., ..., 'break', ..., ..., ...]))
+        self.assertTrue(nfa.match(['for', ..., ..., 'continue', 'break', ..., ..., ...]))
+        self.assertTrue(nfa.match(['for', ..., ..., 'continue', 'break', 'break', ..., ...]))
+        self.assertTrue(nfa.match(['for', 'continue', 'break']))
+
+        self.assertFalse(nfa.match(['for']))
+        self.assertFalse(nfa.match(['for', ..., ..., ..., ...]))
+        self.assertFalse(nfa.match(['for', ..., 'break', 'continue', 'break', 'break', ..., ...]))
 
 
 if __name__ == '__main__':
