@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import Any
 import re
 
-from .parsing import Parser, SingleField, ControlField, SimpleLexer, ActiveToken, InactiveToken
+from htmplate.templateFW.parsing import Parser, SingleField, ControlField, ActiveToken
 
 
 def parse_context_path(context: dict, path: str) -> Any | None:
@@ -43,7 +43,7 @@ class DataField(SingleField):
             else:
                 raise ValueError(f'Context path {match.group(2)} does not exist')
 
-        return self.parser.parse(inner, context)
+        return self.parser._parse_any(inner, context)
 
 
 class FileInclude(SingleField):
@@ -72,7 +72,7 @@ class FileInclude(SingleField):
             return self.content.field_content
         with open(file, encoding='utf-8') as f:
             content = f.read()
-        return self.parser.parse(content, context, **self.extra_context)
+        return self.parser._parse_any(content, context, **self.extra_context)
 
 
 class IterField(ControlField):
@@ -113,7 +113,7 @@ class IterField(ControlField):
             out.append(content)
 
         tmp = ''.join(out)
-        return self.parser.parse(tmp, context, **self.extra_context)
+        return self.parser._parse_any(tmp, context, **self.extra_context)
 
 
 class DictIterField(ControlField):
@@ -155,7 +155,7 @@ class DictIterField(ControlField):
             out.append(content)
 
         tmp = ''.join(out)
-        return self.parser.parse(tmp, context, **self.extra_context)
+        return self.parser._parse_any(tmp, context, **self.extra_context)
 
 
 class ConditionalField(ControlField):
@@ -208,23 +208,23 @@ class ConditionalField(ControlField):
                     raise Parser.ParsingError(f'Unknown type "{type_name}"')
                 if isinstance(value, t):
                     tmp = node.render(context, inner_extra)
-                    return self.parser.parse(tmp, context, **self.extra_context)
+                    return self.parser._parse_any(tmp, context, **self.extra_context)
 
             elif signature == check_sig[1]:
                 if value is not None:
                     tmp = node.render(context, inner_extra)
-                    return self.parser.parse(tmp, context, **self.extra_context)
+                    return self.parser._parse_any(tmp, context, **self.extra_context)
             else:
                 if value is None:
                     return self.get_original()
                 if bool(value):
                     tmp = node.render(context, inner_extra)
-                    return self.parser.parse(tmp, context, **self.extra_context)
+                    return self.parser._parse_any(tmp, context, **self.extra_context)
 
         if signature is not None and signature.name == 'else':
             assert node is not None
             tmp = node.render(context, inner_extra)
-            return self.parser.parse(tmp, context, **self.extra_context)
+            return self.parser._parse_any(tmp, context, **self.extra_context)
 
         return ''
 
@@ -254,6 +254,6 @@ class ContextField(ControlField):
         value = parse_context_path(context, value_name)
         if value is not None:
             tmp = node.render(value, inner_extra)
-            return self.parser.parse(tmp, context, **self.extra_context)
+            return self.parser._parse_any(tmp, context, **self.extra_context)
         else:
             return self.get_original()

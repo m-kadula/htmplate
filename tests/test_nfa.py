@@ -1,6 +1,6 @@
 import unittest
 
-import htmplate.nfa as automata
+import htmplate.templateFW.automata as automata
 
 
 class ENFATest(unittest.TestCase):

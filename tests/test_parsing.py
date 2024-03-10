@@ -1,6 +1,6 @@
 import unittest
 
-from htmplate.parsing import *
+from htmplate.templateFW.parsing import *
 from htmplate.templparser import DataField, ContextField, IterField, ConditionalField
 
 

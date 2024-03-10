@@ -3,7 +3,7 @@ from pathlib import Path
 
 from bs4 import BeautifulSoup
 
-from htmplate.parsing import Parser, SimpleLexer
+from htmplate.templateFW.parsing import Parser, SimpleLexer
 from htmplate.templparser import DataField, IterField, DictIterField, ConditionalField, ContextField, FileInclude
 
 
