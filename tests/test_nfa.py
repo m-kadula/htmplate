@@ -24,6 +24,7 @@ class ENFATest(unittest.TestCase):
         self.assertEqual(0, enfa.start_state)
         self.assertEqual(1, enfa.end_state)
         self.assertEqual(set('abc'), enfa.alphabet)
+        self.assertEqual(set(range(8)), enfa.states)
 
     def test_cat(self):
         exp = automata.ReCat(content=[
@@ -98,6 +99,19 @@ class ENFATest(unittest.TestCase):
             (13, ''): {9}
         }, enfa.dict)
 
+    def test_normalised(self):
+        a = automata.ENFA(0, {5}, {0, 1, 2, 3, 4, 5}, {'a'}, {})
+        self.assertTrue(a.is_normalised)
+        b = automata.ENFA(
+            5,
+            {100},
+            {5, 10, 100, 1000, 10000},
+            {'a'},
+            {(5, 'a'): {100, 10}, (1000, 'a'): {5, 10000}})
+        self.assertFalse(b.is_normalised)
+        b.normalise()
+        self.assertTrue(b.is_normalised)
+
 
 class NFATest(unittest.TestCase):
 
@@ -109,6 +123,9 @@ class NFATest(unittest.TestCase):
         ])
         enfa = automata.ENFA.parse(exp)
         nfa = automata.NFA.from_enfa(enfa)
+        print(nfa.__dict__)
+        nfa.optimise()
+        print(nfa.__dict__)
         self.assertEqual({}, nfa.dict)
 
 

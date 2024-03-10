@@ -100,47 +100,53 @@ class ReCat(ReNode):
         return my_start_state, my_end_state
 
 
-class ENFA:
-
-    def __init__(self,
-                 start_state: int,
-                 end_state: int,
-                 states: range,
-                 alphabet: set[str],
-                 dict_: dict[tuple[int, str], set[int]]):
-        assert states.start == 0 and states.step in [1, None]
-        self.states = states
-        self.alphabet = alphabet
-        self.start_state = start_state
-        self.end_state = end_state
-        self.dict = dict_
-
-    @classmethod
-    def parse(cls, node: ReNode) -> 'ENFA':
-        context = Context()
-        start, end = node.parse(context)
-        alphabet = {s for _, s in context.dict.keys()}.difference({''})
-        return cls(start, end, range(context.last_state), alphabet, context.dict)
-
-
-class NFA:
+class NonDeterministicAutomata:
 
     def __init__(self,
                  start_state: int,
                  end_states: set[int],
-                 states: range,
+                 states: set[int],
                  alphabet: set[str],
                  dict_: dict[tuple[int, str], set[int]]):
-        assert states.start == 0 and states.step in [1, None]
         self.states = states
         self.alphabet = alphabet
         self.start_state = start_state
         self.end_states = end_states
         self.dict = dict_
 
+    @property
+    def is_normalised(self) -> bool:
+        return self.states == set(range(max(self.states) + 1)) and self.start_state == 0
+
+    def normalise(self):
+        transition = (
+                {self.start_state: 0}
+                | {state: i for i, state in enumerate(self.states.difference({self.start_state}), start=1)}
+        )
+        self.start_state = 0
+        self.end_states = set(transition[i] for i in self.end_states)
+        self.states = set(transition.values())
+        self.dict = {(transition[i], s): set(map(lambda x: transition[x], w)) for (i, s), w in self.dict.items()}
+
+
+class ENFA(NonDeterministicAutomata):
+
+    @classmethod
+    def parse(cls, node: ReNode) -> 'ENFA':
+        context = Context()
+        start, end = node.parse(context)
+        alphabet = {s for _, s in context.dict.keys()}.difference({''})
+        states = set(range(context.last_state))
+        return cls(start, {end}, states, alphabet, context.dict)
+
+
+class NFA(NonDeterministicAutomata):
+
     @classmethod
     def from_enfa(cls, enfa: ENFA) -> 'NFA':
-        e_closures = cls._compute_epsilon_closure(enfa)
+        assert enfa.is_normalised
+
+        e_closures = cls._compute_epsilon_closures(max(enfa.states) + 1, enfa.dict)
 
         new_dict: dict[tuple[int, str], set[int]] = {}
         for state in enfa.states:
@@ -156,37 +162,112 @@ class NFA:
                 if len(new_dict[(state, letter)]) == 0:
                     del new_dict[(state, letter)]
 
-        # TODO: delete unnecessary states
-
         new_end_states: set[int] = set()
         for state in enfa.states:
-            if enfa.end_state in e_closures[state]:
+            if len(enfa.end_states.intersection(e_closures[state])) != 0:
                 new_end_states.add(state)
 
-        alphabet = {s for _, s in new_dict.keys()}.difference({''})
-        return cls(enfa.start_state, new_end_states, enfa.states, alphabet, new_dict)
+        return cls(enfa.start_state, new_end_states, enfa.states, enfa.alphabet, new_dict)
 
     @classmethod
-    def _compute_epsilon_closure(cls, enfa: ENFA) -> dict[int, set[int]]:
-        adj_matrix = [[False] * len(enfa.states) for _ in enfa.states]
-        for i in enfa.states:
+    def from_enfa_optimised(cls, enfa: ENFA) -> 'NFA':
+        nfa = cls.from_enfa(enfa)
+        nfa.optimise()
+        return nfa
+
+    @classmethod
+    def _compute_epsilon_closures(cls, states: int, dict_: dict[tuple[int, str], set[int]]) -> dict[int, set[int]]:
+        adj_matrix = [[False] * states for _ in range(states)]
+        for i in range(states):
             adj_matrix[i][i] = True
 
-        for (v, s), w_set in enfa.dict.items():
-            for w in w_set:
-                if s == '':
+        for (v, s), w_set in dict_.items():
+            if s == '':
+                for w in w_set:
                     adj_matrix[v][w] = True
 
-        for k in enfa.states:
-            for i in enfa.states:
-                for j in enfa.states:
+        for k in range(states):
+            for i in range(states):
+                for j in range(states):
                     adj_matrix[i][j] = adj_matrix[i][j] or (adj_matrix[i][k] and adj_matrix[k][j])
 
-        e_closures: dict[int, set[int]] = dict.fromkeys(enfa.states)
-        for state in enfa.states:
-            e_closures[state] = set(i for i in enfa.states if adj_matrix[state][i])
+        e_closures: dict[int, set[int]] = dict.fromkeys(range(states))
+        for state in range(states):
+            e_closures[state] = set(s for s in range(states) if adj_matrix[state][s])
 
         return e_closures
+
+    def optimise(self):
+        if not self.is_normalised:
+            self.normalise()
+        non_generating = self._get_non_generating_states()
+        self._delete_states(non_generating)
+        self.normalise()
+        unreachable = self._get_unreachable_states()
+        self._delete_states(unreachable)
+        self.normalise()
+
+    def _delete_states(self, delete_set: set[int]):
+        assert self.start_state not in delete_set
+
+        self.states.difference_update(delete_set)
+        self.end_states.difference_update(delete_set)
+
+        to_be_deleted: list[tuple[int, str]] = []
+        for (v, s), w_set in self.dict.items():
+            if v in delete_set:
+                to_be_deleted.append((v, s))
+            else:
+                w_set.difference_update(delete_set)
+        for key in to_be_deleted:
+            del self.dict[key]
+
+    def _get_non_generating_states(self) -> set[int]:
+        assert self.is_normalised
+        states_no = len(self.states)
+        adj_matrix = [[False] * states_no for _ in range(states_no)]
+        for i in range(states_no):
+            adj_matrix[i][i] = True
+
+        for (v, s), w_set in self.dict.items():
+            assert s != ''
+            for w in w_set:
+                adj_matrix[v][w] = True
+
+        for k in range(states_no):
+            for i in range(states_no):
+                for j in range(states_no):
+                    adj_matrix[i][j] = adj_matrix[i][j] or (adj_matrix[i][k] and adj_matrix[k][j])
+
+        non_generating = set()
+        for s1 in range(states_no):
+            if not any(adj_matrix[s1][s2] for s2 in self.end_states):
+                non_generating.add(s1)
+
+        return non_generating
+
+    def _get_unreachable_states(self) -> set[int]:
+        assert self.is_normalised
+
+        adj: dict[int, set[int]] = dict.fromkeys(self.states, set())
+        for (v, _), w_set in self.dict.items():
+            adj[v].update(w_set)
+
+        stack = [self.start_state]
+        visited = [False] * len(self.states)
+        visited[self.start_state] = True
+
+        while stack:
+            current_state = stack[-1]
+            if adj[current_state]:
+                next_state = adj[current_state].pop()
+                if not visited[next_state]:
+                    stack.append(next_state)
+                    visited[next_state] = True
+            else:
+                stack.pop()
+
+        return set(filter(lambda s: not visited[s], self.states))
 
 
 class NFAIterator:
@@ -202,6 +283,8 @@ class NFAIterator:
         self.states = frozenset(next_states)
 
     def is_stuck(self) -> bool:
+        if not self.nfa.is_normalised:
+            raise RuntimeWarning(f"{self.nfa} is not normalised.")
         return len(self.states) != 0  # only works if unnecessary states are eliminated
 
     def is_finished(self) -> bool:
