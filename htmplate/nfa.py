@@ -1,19 +1,23 @@
 from abc import ABC, abstractmethod
-from typing import Literal
+from typing import Literal, Iterable, Any
 from functools import reduce
+
+
+def get_automata(expression: 'ReNode') -> 'NFA':
+    return NFA.from_enfa_optimised(ENFA.parse(expression))
 
 
 class Context:
 
     def __init__(self):
-        self.dict: dict[tuple[int, str], set[int]] = {}
+        self.dict: dict[tuple[int, Any], set[int]] = {}
         self.last_state = 0
 
     def get_new_state(self) -> int:
         self.last_state += 1
         return self.last_state - 1
 
-    def add_transition(self, state: int, letter: str, s: set[int]):
+    def add_transition(self, state: int, letter: Any, s: set[int]):
         if (state, letter) not in self.dict:
             self.dict[(state, letter)] = set()
         self.dict[(state, letter)].update(s)
@@ -28,8 +32,8 @@ class ReNode(ABC):
 
 class ReGroundNode(ReNode):
 
-    def __init__(self, content: str):
-        assert content != ''
+    def __init__(self, content: Any):
+        assert content != NonDeterministicAutomata.Epsilon
         self.content = content
 
     def parse(self, context: Context) -> tuple[int, int]:
@@ -53,18 +57,18 @@ class ReItem(ReNode):
         prev_end = my_start_state
         for i in range(self.min_):
             start, end = self.content.parse(context)
-            context.add_transition(prev_end, '', {start})
+            context.add_transition(prev_end, NonDeterministicAutomata.Epsilon, {start})
             prev_end = end
         if self.max_ != float('inf'):
             for i in range(self.min_, self.max_):
                 start, end = self.content.parse(context)
-                context.add_transition(prev_end, '', {start, my_end_state})
+                context.add_transition(prev_end, NonDeterministicAutomata.Epsilon, {start, my_end_state})
                 prev_end = end
-            context.add_transition(prev_end, '', {my_end_state})
+            context.add_transition(prev_end, NonDeterministicAutomata.Epsilon, {my_end_state})
         else:
             start, end = self.content.parse(context)
-            context.add_transition(prev_end, '', {start, my_end_state})
-            context.add_transition(end, '', {start, my_end_state})
+            context.add_transition(prev_end, NonDeterministicAutomata.Epsilon, {start, my_end_state})
+            context.add_transition(end, NonDeterministicAutomata.Epsilon, {start, my_end_state})
         return my_start_state, my_end_state
 
 
@@ -78,8 +82,8 @@ class ReAlt(ReNode):
         my_end_state = context.get_new_state()
         for item in self.content:
             start, end = item.parse(context)
-            context.add_transition(my_start_state, '', {start})
-            context.add_transition(end, '', {my_end_state})
+            context.add_transition(my_start_state, NonDeterministicAutomata.Epsilon, {start})
+            context.add_transition(end, NonDeterministicAutomata.Epsilon, {my_end_state})
         return my_start_state, my_end_state
 
 
@@ -94,19 +98,35 @@ class ReCat(ReNode):
         prev_end = my_start_state
         for item in self.content:
             start, end = item.parse(context)
-            context.add_transition(prev_end, '', {start})
+            context.add_transition(prev_end, NonDeterministicAutomata.Epsilon, {start})
             prev_end = end
-        context.add_transition(prev_end, '', {my_end_state})
+        context.add_transition(prev_end, NonDeterministicAutomata.Epsilon, {my_end_state})
         return my_start_state, my_end_state
 
 
 class NonDeterministicAutomata:
 
+    class _EpsilonClass:
+        __instance = None
+
+        def __new__(cls):
+            if cls.__instance is None:
+                cls.__instance = super().__new__(cls)
+            return cls.__instance
+
+        def __eq__(self, other) -> bool:
+            return other is self
+
+        def __hash__(self):
+            return hash('epsilon')
+
+    Epsilon = _EpsilonClass()
+
     def __init__(self,
                  start_state: int,
                  end_states: set[int],
                  states: set[int],
-                 alphabet: set[str],
+                 alphabet: set[Any],
                  dict_: dict[tuple[int, str], set[int]]):
         self.states = states
         self.alphabet = alphabet
@@ -135,20 +155,31 @@ class ENFA(NonDeterministicAutomata):
     def parse(cls, node: ReNode) -> 'ENFA':
         context = Context()
         start, end = node.parse(context)
-        alphabet = {s for _, s in context.dict.keys()}.difference({''})
+        alphabet = {s for _, s in context.dict.keys()}.difference({NonDeterministicAutomata.Epsilon})
         states = set(range(context.last_state))
         return cls(start, {end}, states, alphabet, context.dict)
 
 
 class NFA(NonDeterministicAutomata):
 
+    def iterator(self) -> 'NFAIterator':
+        return NFAIterator(self)
+
+    def match(self, expression: Iterable[Any]) -> bool:
+        iterator = self.iterator()
+        for item in expression:
+            iterator.next(item)
+            if iterator.is_stuck():
+                return False
+        return iterator.is_finished()
+
     @classmethod
     def from_enfa(cls, enfa: ENFA) -> 'NFA':
         assert enfa.is_normalised
 
-        e_closures = cls._compute_epsilon_closures(max(enfa.states) + 1, enfa.dict)
+        e_closures = cls._compute_epsilon_closures(len(enfa.states), enfa.dict)
 
-        new_dict: dict[tuple[int, str], set[int]] = {}
+        new_dict: dict[tuple[int, Any], set[int]] = {}
         for state in enfa.states:
             for letter in enfa.alphabet:
                 transitioned = reduce(
@@ -176,13 +207,13 @@ class NFA(NonDeterministicAutomata):
         return nfa
 
     @classmethod
-    def _compute_epsilon_closures(cls, states: int, dict_: dict[tuple[int, str], set[int]]) -> dict[int, set[int]]:
+    def _compute_epsilon_closures(cls, states: int, dict_: dict[tuple[int, Any], set[int]]) -> dict[int, set[int]]:
         adj_matrix = [[False] * states for _ in range(states)]
         for i in range(states):
             adj_matrix[i][i] = True
 
         for (v, s), w_set in dict_.items():
-            if s == '':
+            if s == NonDeterministicAutomata.Epsilon:
                 for w in w_set:
                     adj_matrix[v][w] = True
 
@@ -213,7 +244,7 @@ class NFA(NonDeterministicAutomata):
         self.states.difference_update(delete_set)
         self.end_states.difference_update(delete_set)
 
-        to_be_deleted: list[tuple[int, str]] = []
+        to_be_deleted: list[tuple[int, Any]] = []
         for (v, s), w_set in self.dict.items():
             if v in delete_set:
                 to_be_deleted.append((v, s))
@@ -230,7 +261,7 @@ class NFA(NonDeterministicAutomata):
             adj_matrix[i][i] = True
 
         for (v, s), w_set in self.dict.items():
-            assert s != ''
+            assert s != NonDeterministicAutomata.Epsilon
             for w in w_set:
                 adj_matrix[v][w] = True
 
@@ -276,16 +307,14 @@ class NFAIterator:
         self.nfa = nfa
         self.states: frozenset[int] = frozenset({nfa.start_state})
 
-    def next(self, letter: str):
+    def next(self, letter: Any):
         next_states = set()
         for state in self.states:
             next_states.update(self.nfa.dict.get((state, letter), set()))
         self.states = frozenset(next_states)
 
     def is_stuck(self) -> bool:
-        if not self.nfa.is_normalised:
-            raise RuntimeWarning(f"{self.nfa} is not normalised.")
-        return len(self.states) != 0  # only works if unnecessary states are eliminated
+        return len(self.states) == 0  # only works if unnecessary states are eliminated
 
     def is_finished(self) -> bool:
-        return len(self.nfa.end_states.union(self.states)) != 0
+        return len(self.nfa.end_states.intersection(self.states)) != 0
